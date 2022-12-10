@@ -1,5 +1,8 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2017 devemux86
+ * Copyright 2017 nebular
+ * Copyright 2017 Longri
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -14,7 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public License along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 package org.oscim.backend.canvas;
 
 /**
@@ -22,31 +24,40 @@ package org.oscim.backend.canvas;
  */
 public interface Canvas {
 
-	/**
-	 * Sets the backing {@link Bitmap}.
-	 * 
-	 * @param bitmap the new bitmap
-	 */
-	void setBitmap(Bitmap bitmap);
+    /**
+     * Sets the backing {@link Bitmap}.
+     */
+    void setBitmap(Bitmap bitmap);
 
-	/**
-	 * Draw text to Canvas.
-	 * 
-	 * @param string the String
-	 * @param x
-	 * @param y
-	 * @param stroke the stroke
-	 * @param
-	 */
-	void drawText(String string, float x, float y, Paint fill, Paint stroke);
+    /**
+     * Draw text to Canvas.
+     */
+    void drawText(String string, float x, float y, Paint paint);
 
-	/**
-	 * Draw Bitmap to Canvas.
-	 * 
-	 * @param bitmap the Bitmap
-	 * @param x
-	 * @param y
-	 */
-	void drawBitmap(Bitmap bitmap, float x, float y);
+    /**
+     * Draw text to Canvas.
+     */
+    void drawText(String string, float x, float y, Paint fill, Paint stroke);
 
+    /**
+     * Draw Bitmap to Canvas.
+     */
+    void drawBitmap(Bitmap bitmap, float x, float y);
+
+    /**
+     * Draw scaled Bitmap to fill target.
+     */
+    void drawBitmapScaled(Bitmap bitmap);
+
+    void drawCircle(float x, float y, float radius, Paint paint);
+
+    void drawLine(float x1, float y1, float x2, float y2, Paint paint);
+
+    void fillColor(int color);
+
+    void fillRectangle(float x, float y, float width, float height, int color);
+
+    int getHeight();
+
+    int getWidth();
 }

@@ -1,5 +1,7 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 Longri
+ * Copyright 2020 devemux86
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -17,11 +19,7 @@
 package org.oscim.layers.tile.vector;
 
 import org.oscim.core.MapElement;
-import org.oscim.layers.tile.MapTile;
-import org.oscim.layers.tile.TileLayer;
-import org.oscim.layers.tile.TileLoader;
-import org.oscim.layers.tile.TileManager;
-import org.oscim.layers.tile.VectorTileRenderer;
+import org.oscim.layers.tile.*;
 import org.oscim.map.Map;
 import org.oscim.renderer.bucket.RenderBuckets;
 import org.oscim.theme.IRenderTheme;
@@ -39,177 +37,182 @@ import org.slf4j.LoggerFactory;
  * for rendering.
  */
 public class VectorTileLayer extends TileLayer {
-	static final Logger log = LoggerFactory.getLogger(VectorTileLayer.class);
+    static final Logger log = LoggerFactory.getLogger(VectorTileLayer.class);
 
-	protected TileSource mTileSource;
+    private final List<LList<TileLoaderProcessHook>> mLoaderProcessHooks = new List<>();
 
-	public VectorTileLayer(Map map, TileSource tileSource) {
-		this(map, new TileManager(map,
-		                          100),
-		     new VectorTileRenderer());
+    private final List<LList<TileLoaderThemeHook>> mLoaderThemeHooks = new List<>();
 
-		setTileSource(tileSource);
-	}
+    private IRenderTheme mTheme;
 
-	public VectorTileLayer(Map map, int cacheLimit) {
-		this(map, new TileManager(map, cacheLimit),
-		     new VectorTileRenderer());
-	}
+    public VectorTileLayer(Map map, TileSource tileSource) {
+        this(map, new TileManager(map,
+                        100),
+                new VectorTileRenderer());
 
-	public VectorTileLayer(Map map, TileManager tileManager,
-	        VectorTileRenderer renderer) {
-		super(map, tileManager, renderer);
+        setTileSource(tileSource);
+    }
 
-		initLoader(getNumLoaders());
-	}
+    public VectorTileLayer(Map map, int cacheLimit) {
+        this(map, new TileManager(map, cacheLimit),
+                new VectorTileRenderer());
+    }
 
-	@Override
-	protected TileLoader createLoader() {
-		return new VectorTileLoader(this);
-	}
+    public VectorTileLayer(Map map, TileManager tileManager,
+                           VectorTileRenderer renderer) {
+        super(map, tileManager, renderer);
 
-	/**
-	 * Sets the {@link TileSource} used by {@link TileLoader}.
-	 * 
-	 * @return true when new TileSource was set (has changed)
-	 */
-	public boolean setTileSource(TileSource tileSource) {
-		pauseLoaders(true);
-		mTileManager.clearJobs();
-		mTileManager.setZoomLevel(tileSource.getZoomLevelMin(),
-		                          tileSource.getZoomLevelMax());
+        initLoader(getNumLoaders());
+    }
 
-		if (mTileSource != null) {
-			mTileSource.close();
-			mTileSource = null;
-		}
+    @Override
+    protected TileLoader createLoader() {
+        return new VectorTileLoader(this);
+    }
 
-		OpenResult msg = tileSource.open();
+    /**
+     * Sets the {@link TileSource} used by {@link TileLoader}.
+     *
+     * @return true when new TileSource was set (has changed)
+     */
+    public boolean setTileSource(TileSource tileSource) {
+        pauseLoaders(true);
+        mTileManager.clearJobs();
 
-		if (msg != OpenResult.SUCCESS) {
-			log.debug(msg.getErrorMessage());
-			return false;
-		}
+        if (mTileSource != null) {
+            mTileSource.close();
+            mTileSource = null;
+        }
 
-		mTileSource = tileSource;
+        OpenResult msg = tileSource.open();
 
-		for (TileLoader l : mTileLoader)
-			((VectorTileLoader) l).setDataSource(tileSource.getDataSource());
+        if (msg != OpenResult.SUCCESS) {
+            log.debug(msg.getErrorMessage());
+            return false;
+        }
 
-		mMap.clearMap();
-		resumeLoaders();
+        mTileSource = tileSource;
 
-		return true;
-	}
+        mTileManager.setZoomLevel(tileSource.getZoomLevelMin(),
+                tileSource.getZoomLevelMax());
 
-	/**
-	 * Set {@link IRenderTheme} used by {@link TileLoader}
-	 */
-	public void setRenderTheme(IRenderTheme theme) {
-		/* wait for loaders to finish all current jobs to
-		 * not change theme instance hold by loader instance
-		 * while running */
-		pauseLoaders(true);
-		mTileManager.clearJobs();
+        for (TileLoader l : mTileLoader)
+            ((VectorTileLoader) l).setDataSource(tileSource.getDataSource());
 
-		mTheme = theme;
-		//	for (TileLoader l : mTileLoader)
-		//	((VectorTileLoader) l).setRenderTheme(theme);
+        mMap.clearMap();
+        resumeLoaders();
 
-		tileRenderer().setOverdrawColor(theme.getMapBackground());
+        return true;
+    }
 
-		resumeLoaders();
-	}
+    /**
+     * Set {@link IRenderTheme} used by {@link TileLoader}
+     */
+    @Deprecated
+    public void setRenderTheme(IRenderTheme theme) {
+        setTheme(theme);
+    }
 
-	private IRenderTheme mTheme;
+    /**
+     * Set {@link IRenderTheme} used by {@link TileLoader}
+     */
+    public void setTheme(IRenderTheme theme) {
+        /* wait for loaders to finish all current jobs to
+         * not change theme instance hold by loader instance
+         * while running */
+        pauseLoaders(true);
+        mTileManager.clearJobs();
 
-	public IRenderTheme getTheme() {
-		return mTheme;
-	}
+        mTheme = theme;
+        //    for (TileLoader l : mTileLoader)
+        //    ((VectorTileLoader) l).setRenderTheme(theme);
 
-	/**
-	 * Hook to intercept tile data processing. Called concurently by tile
-	 * loader threads, so dont keep tile specific state.
-	 */
-	public interface TileLoaderProcessHook {
-		public boolean process(MapTile tile, RenderBuckets layers, MapElement element);
+        tileRenderer().setOverdrawColor(theme.getMapBackground());
 
-		/** Called on loader thread when tile loading is completed */
-		public void complete(MapTile tile, boolean success);
-	}
+        resumeLoaders();
+    }
 
-	/**
-	 * Hook to intercept tile data processing after theme style lookup. Called
-	 * concurently by tile loader threads, so dont keep tile specific state. See
-	 * e.g. LabelTileLoaderHook.
-	 */
-	public interface TileLoaderThemeHook {
-		/** Called for each RenderStyle found for a MapElement. */
-		public boolean render(MapTile tile, RenderBuckets buckets,
-		        MapElement element, RenderStyle style, int level);
+    public IRenderTheme getTheme() {
+        return mTheme;
+    }
 
-		/** Called on loader thread when tile loading is completed */
-		public void complete(MapTile tile, boolean success);
-	}
+    /**
+     * Hook to intercept tile data processing. Called concurently by tile
+     * loader threads, so dont keep tile specific state.
+     */
+    public interface TileLoaderProcessHook {
+        public boolean process(MapTile tile, RenderBuckets layers, MapElement element);
 
-	private List<LList<TileLoaderProcessHook>> mLoaderProcessHooks =
-	        new List<LList<TileLoaderProcessHook>>();
+        /**
+         * Called on loader thread when tile loading is completed
+         */
+        public void complete(MapTile tile, boolean success);
+    }
 
-	private List<LList<TileLoaderThemeHook>> mLoaderThemeHooks =
-	        new List<LList<TileLoaderThemeHook>>();
+    /**
+     * Hook to intercept tile data processing after theme style lookup. Called
+     * concurently by tile loader threads, so dont keep tile specific state. See
+     * e.g. LabelTileLoaderHook.
+     */
+    public interface TileLoaderThemeHook {
+        /**
+         * Called for each RenderStyle found for a MapElement.
+         */
+        public boolean process(MapTile tile, RenderBuckets buckets,
+                               MapElement element, RenderStyle style, int level);
 
-	public void addHook(TileLoaderProcessHook h) {
-		mLoaderProcessHooks.append(new LList<TileLoaderProcessHook>(h));
-	}
+        /**
+         * Called on loader thread when tile loading is completed
+         */
+        public void complete(MapTile tile, boolean success);
+    }
 
-	public void addHook(TileLoaderThemeHook h) {
-		mLoaderThemeHooks.append(new LList<TileLoaderThemeHook>(h));
-	}
+    public void addHook(TileLoaderProcessHook h) {
+        mLoaderProcessHooks.append(new LList<TileLoaderProcessHook>(h));
+    }
 
-	@Override
-	public void onDetach() {
-		super.onDetach();
-		mTileSource.close();
-	}
+    public void addHook(TileLoaderThemeHook h) {
+        mLoaderThemeHooks.append(new LList<TileLoaderThemeHook>(h));
+    }
 
-	public void callThemeHooks(MapTile tile, RenderBuckets layers, MapElement element,
-	        RenderStyle style, int level) {
+    public void callThemeHooks(MapTile tile, RenderBuckets layers, MapElement element,
+                               RenderStyle style, int level) {
 
-		LList<TileLoaderThemeHook> th = mLoaderThemeHooks.head();
-		while (th != null) {
-			if (th.data.render(tile, layers, element, style, level))
-				return;
+        LList<TileLoaderThemeHook> th = mLoaderThemeHooks.head();
+        while (th != null) {
+            if (th.data.process(tile, layers, element, style, level))
+                return;
 
-			th = th.next;
-		}
-	}
+            th = th.next;
+        }
+    }
 
-	public boolean callProcessHooks(MapTile tile, RenderBuckets layers, MapElement element) {
+    public boolean callProcessHooks(MapTile tile, RenderBuckets layers, MapElement element) {
 
-		LList<TileLoaderProcessHook> ph = mLoaderProcessHooks.head();
-		while (ph != null) {
-			if (ph.data.process(tile, layers, element))
-				return true;
-			ph = ph.next;
-		}
+        LList<TileLoaderProcessHook> ph = mLoaderProcessHooks.head();
+        while (ph != null) {
+            if (ph.data.process(tile, layers, element))
+                return true;
+            ph = ph.next;
+        }
 
-		return false;
-	}
+        return false;
+    }
 
-	public void callHooksComplete(MapTile tile, boolean success) {
-		/* NB: cannot use internal iterater as this function
-		 * is called concurently by TileLoaders */
+    public void callHooksComplete(MapTile tile, boolean success) {
+        /* NB: cannot use internal iterater as this function
+         * is called concurently by TileLoaders */
 
-		LList<TileLoaderThemeHook> th = mLoaderThemeHooks.head();
-		while (th != null) {
-			th.data.complete(tile, success);
-			th = th.next;
-		}
+        LList<TileLoaderThemeHook> th = mLoaderThemeHooks.head();
+        while (th != null) {
+            th.data.complete(tile, success);
+            th = th.next;
+        }
 
-		LList<TileLoaderProcessHook> ph = mLoaderProcessHooks.head();
-		while (ph != null) {
-			ph.data.complete(tile, success);
-			ph = ph.next;
-		}
-	}
+        LList<TileLoaderProcessHook> ph = mLoaderProcessHooks.head();
+        while (ph != null) {
+            ph.data.complete(tile, success);
+            ph = ph.next;
+        }
+    }
 }

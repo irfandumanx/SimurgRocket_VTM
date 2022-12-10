@@ -1,6 +1,9 @@
 /*
  * Copyright 2010, 2011, 2012 mapsforge.org
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2021 devemux86
+ * Copyright 2017 Andrey Novikov
+ * Copyright 2021 eddiemuc
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -17,74 +20,119 @@
  */
 package org.oscim.theme;
 
+import org.oscim.theme.IRenderTheme.ThemeException;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
-
-import org.oscim.theme.IRenderTheme.ThemeException;
 
 /**
  * An ExternalRenderTheme allows for customizing the rendering style of the map
  * via an XML file.
  */
 public class ExternalRenderTheme implements ThemeFile {
-	private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 1L;
 
-	private final long mFileModificationDate;
-	private final String mPath;
+    private final long mFileModificationDate;
+    private boolean mMapsforgeTheme;
+    private XmlRenderThemeMenuCallback mMenuCallback;
+    private final String mPath;
+    private XmlThemeResourceProvider mResourceProvider;
 
-	/**
-	 * @param fileName
-	 *            the path to the XML render theme file.
-	 * @throws FileNotFoundException
-	 *             if the file does not exist or cannot be read.
-	 */
-	public ExternalRenderTheme(String fileName) {
+    /**
+     * @param fileName the path to the XML render theme file.
+     * @throws ThemeException if the file does not exist or cannot be read.
+     */
+    public ExternalRenderTheme(String fileName) throws ThemeException {
+        this(fileName, null);
+    }
 
-		File themeFile = new File(fileName);
-		if (!themeFile.exists()) {
-			throw new ThemeException("file does not exist: " + themeFile.getAbsolutePath());
-		} else if (!themeFile.isFile()) {
-			throw new ThemeException("not a file: " + fileName);
-		} else if (!themeFile.canRead()) {
-			throw new ThemeException("cannot read file: " + fileName);
-		}
+    /**
+     * @param fileName     the path to the XML render theme file.
+     * @param menuCallback the interface callback to create a settings menu on the fly.
+     * @throws ThemeException if the file does not exist or cannot be read.
+     */
+    public ExternalRenderTheme(String fileName, XmlRenderThemeMenuCallback menuCallback) throws ThemeException {
+        File themeFile = new File(fileName);
+        if (!themeFile.exists()) {
+            throw new ThemeException("file does not exist: " + themeFile.getAbsolutePath());
+        } else if (!themeFile.isFile()) {
+            throw new ThemeException("not a file: " + fileName);
+        } else if (!themeFile.canRead()) {
+            throw new ThemeException("cannot read file: " + fileName);
+        }
 
-		mFileModificationDate = themeFile.lastModified();
-		if (mFileModificationDate == 0L) {
-			throw new ThemeException("cannot read last modification time");
-		}
-		mPath = fileName;
-	}
+        mFileModificationDate = themeFile.lastModified();
+        if (mFileModificationDate == 0L) {
+            throw new ThemeException("cannot read last modification time");
+        }
+        mPath = fileName;
+        mMenuCallback = menuCallback;
+    }
 
-	@Override
-	public boolean equals(Object obj) {
-		if (this == obj) {
-			return true;
-		} else if (!(obj instanceof ExternalRenderTheme)) {
-			return false;
-		}
-		ExternalRenderTheme other = (ExternalRenderTheme) obj;
-		if (mFileModificationDate != other.mFileModificationDate) {
-			return false;
-		} else if (mPath == null && other.mPath != null) {
-			return false;
-		} else if (mPath != null && !mPath.equals(other.mPath)) {
-			return false;
-		}
-		return true;
-	}
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        } else if (!(obj instanceof ExternalRenderTheme)) {
+            return false;
+        }
+        ExternalRenderTheme other = (ExternalRenderTheme) obj;
+        if (mFileModificationDate != other.mFileModificationDate) {
+            return false;
+        } else if (mPath == null && other.mPath != null) {
+            return false;
+        } else if (mPath != null && !mPath.equals(other.mPath)) {
+            return false;
+        }
+        return true;
+    }
 
-	@Override
-	public InputStream getRenderThemeAsStream() {
-		InputStream is;
+    @Override
+    public XmlRenderThemeMenuCallback getMenuCallback() {
+        return mMenuCallback;
+    }
 
-		try {
-			is = new FileInputStream(mPath);
-		} catch (FileNotFoundException e) {
-			throw new ThemeException(e.getMessage());
-		}
-		return is;
-	}
+    @Override
+    public String getRelativePathPrefix() {
+        return new File(mPath).getParent();
+    }
+
+    @Override
+    public InputStream getRenderThemeAsStream() throws ThemeException {
+        InputStream is;
+
+        try {
+            is = new FileInputStream(mPath);
+        } catch (FileNotFoundException e) {
+            throw new ThemeException(e.getMessage());
+        }
+        return is;
+    }
+
+    @Override
+    public XmlThemeResourceProvider getResourceProvider() {
+        return mResourceProvider;
+    }
+
+    @Override
+    public boolean isMapsforgeTheme() {
+        return mMapsforgeTheme;
+    }
+
+    @Override
+    public void setMapsforgeTheme(boolean mapsforgeTheme) {
+        mMapsforgeTheme = mapsforgeTheme;
+    }
+
+    @Override
+    public void setMenuCallback(XmlRenderThemeMenuCallback menuCallback) {
+        mMenuCallback = menuCallback;
+    }
+
+    @Override
+    public void setResourceProvider(XmlThemeResourceProvider resourceProvider) {
+        mResourceProvider = resourceProvider;
+    }
 }

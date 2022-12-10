@@ -1,5 +1,7 @@
 /*
  * Copyright 2012 Hannes Janetzek
+ * Copyright 2016-2018 devemux86
+ * Copyright 2018 Izumi Kawashima
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -20,182 +22,223 @@ import org.oscim.utils.FastMath;
 
 public class MapPosition {
 
-	/** Projected position x 0..1 */
-	public double x;
+    /**
+     * Projected position x 0..1
+     */
+    public double x;
 
-	/** Projected position y 0..1 */
-	public double y;
+    /**
+     * Projected position y 0..1
+     */
+    public double y;
 
-	/**
-	 * Absolute scale
-	 * - use setScale() to modify
-	 */
-	public double scale;
+    /**
+     * Absolute scale
+     * - use setScale() to modify
+     */
+    public double scale;
 
-	/** Rotation angle */
-	public float bearing;
+    /**
+     * Rotation angle
+     */
+    public float bearing;
 
-	/** Perspective tilt */
-	public float tilt;
+    /**
+     * Perspective tilt
+     */
+    public float tilt;
 
-	/**
-	 * Zoom-level for current scale.
-	 * - To be removed: FastMath.log2(scale)
-	 * - use setZoomLevel() to modify
-	 */
-	public int zoomLevel;
+    /**
+     * Perspective roll
+     */
+    public float roll;
 
-	public MapPosition() {
-		this.scale = 1;
-		this.x = 0.5;
-		this.y = 0.5;
-		this.zoomLevel = 1;
-		this.bearing = 0;
-	}
+    /**
+     * Zoom-level for current scale.
+     * - To be removed: FastMath.log2(scale)
+     * - use setZoomLevel() to modify
+     */
+    public int zoomLevel;
 
-	public MapPosition(double latitude, double longitude, double scale) {
-		setPosition(latitude, longitude);
-		setScale(scale);
-	}
+    public MapPosition() {
+        this.scale = 1;
+        this.x = 0.5;
+        this.y = 0.5;
+        this.zoomLevel = 0;
+        this.bearing = 0;
+        this.tilt = 0;
+        this.roll = 0;
+    }
 
-	public double getX() {
-		return x;
-	}
+    public MapPosition(double latitude, double longitude, double scale) {
+        setPosition(latitude, longitude);
+        setScale(scale);
+    }
 
-	public MapPosition setX(double x) {
-		this.x = x;
-		return this;
-	}
+    public double getX() {
+        return x;
+    }
 
-	public double getY() {
-		return y;
-	}
+    public MapPosition setX(double x) {
+        this.x = x;
+        return this;
+    }
 
-	public MapPosition setY(double y) {
-		this.y = y;
-		return this;
-	}
+    public double getY() {
+        return y;
+    }
 
-	public float getBearing() {
-		return bearing;
-	}
+    public MapPosition setY(double y) {
+        this.y = y;
+        return this;
+    }
 
-	public MapPosition setBearing(float bearing) {
-		this.bearing = bearing;
-		return this;
-	}
+    public float getBearing() {
+        return bearing;
+    }
 
-	public float getTilt() {
-		return tilt;
-	}
+    public MapPosition setBearing(float bearing) {
+        this.bearing = (float) FastMath.clampDegree(bearing);
+        return this;
+    }
 
-	public MapPosition setTilt(float tilt) {
-		this.tilt = tilt;
-		return this;
-	}
+    public float getRoll() {
+        return roll;
+    }
 
-	public double getScale() {
-		return scale;
-	}
+    public MapPosition setRoll(float roll) {
+        this.roll = (float) FastMath.clampDegree(roll);
+        return this;
+    }
 
-	public int getZoomLevel() {
-		return zoomLevel;
-	}
+    public float getTilt() {
+        return tilt;
+    }
 
-	public MapPosition setZoomLevel(int zoomLevel) {
-		this.zoomLevel = zoomLevel;
-		this.scale = 1 << zoomLevel;
-		return this;
-	}
+    public MapPosition setTilt(float tilt) {
+        this.tilt = tilt;
+        return this;
+    }
 
-	public MapPosition setScale(double scale) {
-		this.zoomLevel = FastMath.log2((int) scale);
-		this.scale = scale;
-		return this;
-	}
+    public double getScale() {
+        return scale;
+    }
 
-	public void setPosition(GeoPoint geoPoint) {
-		setPosition(geoPoint.getLatitude(), geoPoint.getLongitude());
-	}
+    public MapPosition setScale(double scale) {
+        this.zoomLevel = FastMath.log2((int) scale);
+        this.scale = scale;
+        return this;
+    }
 
-	public void setPosition(double latitude, double longitude) {
-		latitude = MercatorProjection.limitLatitude(latitude);
-		longitude = MercatorProjection.limitLongitude(longitude);
-		this.x = MercatorProjection.longitudeToX(longitude);
-		this.y = MercatorProjection.latitudeToY(latitude);
-	}
+    /**
+     * @return the fractional zoom.
+     */
+    public double getZoom() {
+        return Math.log(scale) / Math.log(2);
+    }
 
-	public void copy(MapPosition other) {
-		this.x = other.x;
-		this.y = other.y;
+    /**
+     * Sets the fractional zoom.
+     */
+    public void setZoom(double zoom) {
+        setScale(Math.pow(2, zoom));
+    }
 
-		this.bearing = other.bearing;
-		this.scale = other.scale;
-		this.tilt = other.tilt;
-		this.zoomLevel = other.zoomLevel;
-	}
+    public int getZoomLevel() {
+        return zoomLevel;
+    }
 
-	public void set(double x, double y, double scale, float bearing, float tilt) {
-		this.x = x;
-		this.y = y;
-		this.scale = scale;
+    public MapPosition setZoomLevel(int zoomLevel) {
+        this.zoomLevel = zoomLevel;
+        this.scale = 1 << zoomLevel;
+        return this;
+    }
 
-		while (bearing > 180)
-			bearing -= 360;
-		while (bearing < -180)
-			bearing += 360;
-		this.bearing = bearing;
+    public void setPosition(GeoPoint geoPoint) {
+        setPosition(geoPoint.getLatitude(), geoPoint.getLongitude());
+    }
 
-		this.tilt = tilt;
-		this.zoomLevel = FastMath.log2((int) scale);
-	}
+    public void setPosition(double latitude, double longitude) {
+        latitude = MercatorProjection.limitLatitude(latitude);
+        longitude = MercatorProjection.limitLongitude(longitude);
+        this.x = MercatorProjection.longitudeToX(longitude);
+        this.y = MercatorProjection.latitudeToY(latitude);
+    }
 
-	/**
-	 * @return scale relative to zoom-level.
-	 */
-	public double getZoomScale() {
-		return scale / (1 << zoomLevel);
-	}
+    public void copy(MapPosition other) {
+        this.x = other.x;
+        this.y = other.y;
 
-	public GeoPoint getGeoPoint() {
-		return new GeoPoint(MercatorProjection.toLatitude(y),
-		                    MercatorProjection.toLongitude(x));
-	}
+        this.bearing = other.bearing;
+        this.scale = other.scale;
+        this.tilt = other.tilt;
+        this.zoomLevel = other.zoomLevel;
+        this.roll = other.roll;
+    }
 
-	public double getLatitude() {
-		return MercatorProjection.toLatitude(y);
-	}
+    public void set(double x, double y, double scale, float bearing, float tilt) {
+        this.x = x;
+        this.y = y;
+        this.scale = scale;
 
-	public double getLongitude() {
-		return MercatorProjection.toLongitude(x);
-	}
+        this.bearing = (float) FastMath.clampDegree(bearing);
+        this.tilt = tilt;
+        this.zoomLevel = FastMath.log2((int) scale);
+    }
 
-	public void setByBoundingBox(BoundingBox bbox, int viewWidth, int viewHeight) {
-		double minx = MercatorProjection.longitudeToX(bbox.getMinLongitude());
-		double miny = MercatorProjection.latitudeToY(bbox.getMaxLatitude());
+    public void set(double x, double y, double scale, float bearing, float tilt, float roll) {
+        set(x, y, scale, bearing, tilt);
+        this.roll = (float) FastMath.clampDegree(roll);
+    }
 
-		double dx = Math.abs(MercatorProjection.longitudeToX(bbox.getMaxLongitude()) - minx);
-		double dy = Math.abs(MercatorProjection.latitudeToY(bbox.getMinLatitude()) - miny);
-		double zx = viewWidth / (dx * Tile.SIZE);
-		double zy = viewHeight / (dy * Tile.SIZE);
+    /**
+     * @return scale relative to zoom-level.
+     */
+    public double getZoomScale() {
+        return scale / (1 << zoomLevel);
+    }
 
-		scale = Math.min(zx, zy);
-		x = minx + dx / 2;
-		y = miny + dy / 2;
-		bearing = 0;
-		tilt = 0;
-	}
+    public GeoPoint getGeoPoint() {
+        return new GeoPoint(MercatorProjection.toLatitude(y),
+                MercatorProjection.toLongitude(x));
+    }
 
-	@Override
-	public String toString() {
-		return new StringBuilder()
-		    .append("[X:").append(x)
-		    .append(", Y:").append(y)
-		    .append(", Z:").append(zoomLevel)
-		    .append("] lat:")
-		    .append(MercatorProjection.toLatitude(y))
-		    .append(", lon:")
-		    .append(MercatorProjection.toLongitude(x))
-		    .toString();
-	}
+    public double getLatitude() {
+        return MercatorProjection.toLatitude(y);
+    }
+
+    public double getLongitude() {
+        return MercatorProjection.toLongitude(x);
+    }
+
+    public void setByBoundingBox(BoundingBox bbox, int viewWidth, int viewHeight) {
+        double minx = MercatorProjection.longitudeToX(bbox.getMinLongitude());
+        double miny = MercatorProjection.latitudeToY(bbox.getMaxLatitude());
+
+        double dx = Math.abs(MercatorProjection.longitudeToX(bbox.getMaxLongitude()) - minx);
+        double dy = Math.abs(MercatorProjection.latitudeToY(bbox.getMinLatitude()) - miny);
+        double zx = viewWidth / (dx * Tile.SIZE);
+        double zy = viewHeight / (dy * Tile.SIZE);
+
+        scale = Math.min(zx, zy);
+        zoomLevel = FastMath.log2((int) scale);
+        x = minx + dx / 2;
+        y = miny + dy / 2;
+        bearing = 0;
+        tilt = 0;
+        roll = 0;
+    }
+
+    @Override
+    public String toString() {
+        return new StringBuilder()
+                .append("[X:").append(x)
+                .append(", Y:").append(y)
+                .append(", Z:").append(zoomLevel)
+                .append("] lat:")
+                .append(MercatorProjection.toLatitude(y))
+                .append(", lon:")
+                .append(MercatorProjection.toLongitude(x))
+                .toString();
+    }
 }

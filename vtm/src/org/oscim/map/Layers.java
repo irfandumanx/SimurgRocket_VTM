@@ -1,5 +1,9 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2019 devemux86
+ * Copyright 2016 Andrey Novikov
+ * Copyright 2017 Longri
+ * Copyright 2018 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,141 +20,280 @@
  */
 package org.oscim.map;
 
-import java.util.AbstractList;
-import java.util.concurrent.CopyOnWriteArrayList;
-
 import org.oscim.event.Gesture;
 import org.oscim.event.GestureListener;
 import org.oscim.event.MotionEvent;
+import org.oscim.layers.GroupLayer;
 import org.oscim.layers.Layer;
+import org.oscim.layers.tile.ZoomLimiter;
 import org.oscim.map.Map.InputListener;
 import org.oscim.map.Map.UpdateListener;
 import org.oscim.renderer.LayerRenderer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.AbstractList;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class Layers extends AbstractList<Layer> {
 
-	private final CopyOnWriteArrayList<Layer> mLayerList;
-	private final Map mMap;
+    private static final Logger log = LoggerFactory.getLogger(Layers.class);
 
-	private boolean mDirtyLayers;
-	private LayerRenderer[] mLayerRenderer;
-	private Layer[] mLayers;
+    private final Map mMap;
+    private final Layer.EnableHandler mEnableHandler;
 
-	Layers(Map map) {
-		mMap = map;
-		mLayerList = new CopyOnWriteArrayList<Layer>();
-	}
+    private final List<Layer> mLayerList = new CopyOnWriteArrayList<>();
+    private final List<Integer> mGroupList = new ArrayList<>();
+    private final java.util.Map<Integer, Integer> mGroupIndex = new HashMap<>();
 
-	@Override
-	public synchronized Layer get(int index) {
-		return mLayerList.get(index);
-	}
+    private boolean mDirtyLayers;
+    private LayerRenderer[] mLayerRenderer;
+    private Layer[] mLayers;
 
-	@Override
-	public synchronized int size() {
-		return mLayerList.size();
-	}
+    Layers(Map map) {
+        mMap = map;
+        mEnableHandler = new Layer.EnableHandler() {
+            @Override
+            public void changed(boolean enabled) {
+                mDirtyLayers = true;
+            }
+        };
+    }
 
-	@Override
-	public synchronized void add(int index, Layer layer) {
-		if (mLayerList.contains(layer))
-			throw new IllegalArgumentException("layer added twice");
 
-		if (layer instanceof UpdateListener)
-			mMap.events.bind((UpdateListener) layer);
+    @Override
+    public synchronized Layer get(int index) {
+        return mLayerList.get(index);
+    }
 
-		if (layer instanceof InputListener)
-			mMap.input.bind((InputListener) layer);
+    @Override
+    public synchronized int size() {
+        return mLayerList.size();
+    }
 
-		mLayerList.add(index, layer);
-		mDirtyLayers = true;
-	}
+    @Override
+    public synchronized void add(int index, Layer layer) {
+        if (mLayerList.contains(layer))
+            throw new IllegalArgumentException("layer added twice");
 
-	@Override
-	public synchronized Layer remove(int index) {
-		mDirtyLayers = true;
+        // bind added layer
+        if (layer instanceof UpdateListener)
+            mMap.events.bind((UpdateListener) layer);
+        if (layer instanceof InputListener)
+            mMap.input.bind((InputListener) layer);
+        // add zoom limit to tile manager
+        if (layer instanceof ZoomLimiter.IZoomLimiter)
+            ((ZoomLimiter.IZoomLimiter) layer).addZoomLimit();
 
-		Layer remove = mLayerList.remove(index);
+        // bind added group layer
+        if (layer instanceof GroupLayer) {
+            GroupLayer groupLayer = (GroupLayer) layer;
+            for (Layer gl : groupLayer.layers) {
+                if (gl instanceof UpdateListener)
+                    mMap.events.bind((UpdateListener) gl);
+                if (gl instanceof InputListener)
+                    mMap.input.bind((InputListener) gl);
+                if (gl instanceof ZoomLimiter.IZoomLimiter)
+                    ((ZoomLimiter.IZoomLimiter) gl).addZoomLimit();
+            }
+        }
 
-		if (remove instanceof UpdateListener)
-			mMap.events.unbind((UpdateListener) remove);
-		if (remove instanceof InputListener)
-			mMap.input.unbind((InputListener) remove);
+        layer.setEnableHandler(mEnableHandler);
+        mLayerList.add(index, layer);
+        mDirtyLayers = true;
+    }
 
-		return remove;
-	}
+    /**
+     * Add using layer groups.
+     */
+    public synchronized void add(Layer layer, int group) {
+        int index = mGroupList.indexOf(group);
+        if (index < 0)
+            throw new IllegalArgumentException("unknown layer group");
+        if (mLayerList.contains(layer))
+            throw new IllegalArgumentException("layer added twice");
 
-	@Override
-	public synchronized Layer set(int index, Layer layer) {
-		if (mLayerList.contains(layer))
-			throw new IllegalArgumentException("layer added twice");
+        index++;
+        if (index == mGroupList.size())
+            add(layer);
+        else {
+            add(mGroupIndex.get(mGroupList.get(index)), layer);
+            for (int i = index; i < mGroupList.size(); i++) {
+                group = mGroupList.get(i);
+                mGroupIndex.put(group, mGroupIndex.get(group) + 1);
+            }
+        }
+    }
 
-		mDirtyLayers = true;
-		Layer remove = mLayerList.set(index, layer);
+    @Override
+    public synchronized Layer remove(int index) {
+        mDirtyLayers = true;
 
-		// unbind replaced layer
-		if (remove instanceof UpdateListener)
-			mMap.events.unbind((UpdateListener) remove);
-		if (remove instanceof InputListener)
-			mMap.input.unbind((InputListener) remove);
+        Layer remove = mLayerList.remove(index);
 
-		return remove;
-	}
+        // unbind removed layer
+        if (remove instanceof UpdateListener)
+            mMap.events.unbind((UpdateListener) remove);
+        if (remove instanceof InputListener)
+            mMap.input.unbind((InputListener) remove);
+        // remove zoom limit from tile manager
+        if (remove instanceof ZoomLimiter.IZoomLimiter)
+            ((ZoomLimiter.IZoomLimiter) remove).removeZoomLimit();
 
-	/**
-	 * Should only be used by MapRenderer.
-	 * 
-	 * @return the current LayerRenderer as array.
-	 * */
-	public LayerRenderer[] getLayerRenderer() {
-		if (mDirtyLayers)
-			updateLayers();
+        // unbind removed group layer
+        if (remove instanceof GroupLayer) {
+            GroupLayer groupLayer = (GroupLayer) remove;
+            for (Layer gl : groupLayer.layers) {
+                if (gl instanceof UpdateListener)
+                    mMap.events.unbind((UpdateListener) gl);
+                if (gl instanceof InputListener)
+                    mMap.input.unbind((InputListener) gl);
+                if (gl instanceof ZoomLimiter.IZoomLimiter)
+                    ((ZoomLimiter.IZoomLimiter) gl).removeZoomLimit();
+            }
+        }
 
-		return mLayerRenderer;
-	}
+        // update layer group pointers
+        for (Integer group : mGroupIndex.keySet()) {
+            int pointer = mGroupIndex.get(group);
+            if (pointer > index)
+                mGroupIndex.put(group, pointer - 1);
+        }
 
-	void destroy() {
-		if (mDirtyLayers)
-			updateLayers();
+        remove.setEnableHandler(null);
+        return remove;
+    }
 
-		for (Layer o : mLayers)
-			o.onDetach();
-	}
+    @Override
+    public synchronized Layer set(int index, Layer layer) {
+        if (mLayerList.contains(layer))
+            throw new IllegalArgumentException("layer added twice");
 
-	boolean handleGesture(Gesture g, MotionEvent e) {
-		if (mDirtyLayers)
-			updateLayers();
+        mDirtyLayers = true;
+        Layer remove = mLayerList.set(index, layer);
 
-		for (Layer o : mLayers)
-			if (o instanceof GestureListener)
-				if (((GestureListener) o).onGesture(g, e))
-					return true;
+        // unbind replaced layer
+        if (remove instanceof UpdateListener)
+            mMap.events.unbind((UpdateListener) remove);
+        if (remove instanceof InputListener)
+            mMap.input.unbind((InputListener) remove);
+        // remove zoom limit from tile manager
+        if (remove instanceof ZoomLimiter.IZoomLimiter)
+            ((ZoomLimiter.IZoomLimiter) remove).removeZoomLimit();
 
-		return false;
-	}
+        // unbind replaced group layer
+        if (remove instanceof GroupLayer) {
+            GroupLayer groupLayer = (GroupLayer) remove;
+            for (Layer gl : groupLayer.layers) {
+                if (gl instanceof UpdateListener)
+                    mMap.events.unbind((UpdateListener) gl);
+                if (gl instanceof InputListener)
+                    mMap.input.unbind((InputListener) gl);
+                if (gl instanceof ZoomLimiter.IZoomLimiter)
+                    ((ZoomLimiter.IZoomLimiter) gl).removeZoomLimit();
+            }
+        }
 
-	private synchronized void updateLayers() {
-		mLayers = new Layer[mLayerList.size()];
-		int numRenderLayers = 0;
+        remove.setEnableHandler(null);
+        return remove;
+    }
 
-		for (int i = 0, n = mLayerList.size(); i < n; i++) {
-			Layer o = mLayerList.get(i);
+    public synchronized void addGroup(int group) {
+        if (mGroupList.contains(group))
+            throw new IllegalArgumentException("group added twice");
 
-			if (o.getRenderer() != null)
-				numRenderLayers++;
+        mGroupList.add(group);
+        mGroupIndex.put(group, mLayerList.size());
+    }
 
-			mLayers[n - i - 1] = o;
-		}
+    /**
+     * Should only be used by MapRenderer.
+     *
+     * @return the current LayerRenderer as array.
+     */
+    public synchronized LayerRenderer[] getLayerRenderer() {
+        if (mDirtyLayers)
+            updateLayers();
 
-		mLayerRenderer = new LayerRenderer[numRenderLayers];
+        return mLayerRenderer;
+    }
 
-		for (int i = 0, cnt = 0, n = mLayerList.size(); i < n; i++) {
-			Layer o = mLayerList.get(i);
-			LayerRenderer l = o.getRenderer();
-			if (l != null)
-				mLayerRenderer[cnt++] = l;
-		}
+    synchronized void destroy() {
+        if (mDirtyLayers)
+            updateLayers();
 
-		mDirtyLayers = false;
-	}
+        for (Layer o : mLayers)
+            o.onDetach();
+    }
+
+    synchronized boolean handleGesture(Gesture g, MotionEvent e) {
+        if (mDirtyLayers)
+            updateLayers();
+
+        for (Layer o : mLayers) {
+            if (o instanceof GestureListener)
+                if (((GestureListener) o).onGesture(g, e))
+                    return true;
+
+            if (o instanceof GroupLayer) {
+                GroupLayer groupLayer = (GroupLayer) o;
+                for (Layer gl : groupLayer.layers) {
+                    if (gl instanceof GestureListener)
+                        if (((GestureListener) gl).onGesture(g, e))
+                            return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    public synchronized void updateLayers() {
+        try {
+            mLayers = new Layer[mLayerList.size()];
+            int numRenderLayers = 0;
+
+            for (int i = 0, n = mLayerList.size(); i < n; i++) {
+                Layer o = mLayerList.get(i);
+
+                if (o.isEnabled() && o.getRenderer() != null)
+                    numRenderLayers++;
+
+                if (o instanceof GroupLayer) {
+                    GroupLayer groupLayer = (GroupLayer) o;
+                    for (Layer gl : groupLayer.layers) {
+                        if (gl.isEnabled() && gl.getRenderer() != null)
+                            numRenderLayers++;
+                    }
+                }
+
+                mLayers[n - i - 1] = o;
+            }
+
+            mLayerRenderer = new LayerRenderer[numRenderLayers];
+
+            for (int i = 0, cnt = 0, n = mLayerList.size(); i < n; i++) {
+                Layer o = mLayerList.get(i);
+                LayerRenderer l = o.getRenderer();
+                if (o.isEnabled() && l != null)
+                    mLayerRenderer[cnt++] = l;
+
+                if (o instanceof GroupLayer) {
+                    GroupLayer groupLayer = (GroupLayer) o;
+                    for (Layer gl : groupLayer.layers) {
+                        l = gl.getRenderer();
+                        if (gl.isEnabled() && l != null)
+                            mLayerRenderer[cnt++] = l;
+                    }
+                }
+            }
+
+            mDirtyLayers = false;
+        } catch (Exception e) {
+            log.error(e.getMessage(), e);
+        }
+    }
 }

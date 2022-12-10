@@ -1,5 +1,7 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2017 Longri
+ * Copyright 2017 devemux86
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -21,40 +23,52 @@ import org.oscim.renderer.LayerRenderer;
 
 public abstract class Layer {
 
-	public Layer(Map map) {
-		mMap = map;
-	}
+    public Layer(Map map) {
+        mMap = map;
+    }
 
-	private boolean mEnabled = true;
-	protected final Map mMap;
+    private boolean mEnabled = true;
+    private EnableHandler mHandler;
+    protected final Map mMap;
 
-	protected LayerRenderer mRenderer;
+    protected LayerRenderer mRenderer;
 
-	public LayerRenderer getRenderer() {
-		return mRenderer;
-	}
+    public LayerRenderer getRenderer() {
+        return mRenderer;
+    }
 
-	/**
-	 * Enabled layers will be considered for rendering and receive onMapUpdate()
-	 * calls when they implement MapUpdateListener.
-	 * 
-	 * @param enabled
-	 */
-	public void setEnabled(boolean enabled) {
-		mEnabled = enabled;
-	}
+    /**
+     * Enabled layers will be considered for rendering and receive onMapUpdate()
+     * calls when they implement MapUpdateListener.
+     *
+     * @param enabled
+     */
+    public void setEnabled(boolean enabled) {
+        boolean changed = mEnabled != enabled;
+        mEnabled = enabled;
+        if (mHandler != null && changed)
+            mHandler.changed(enabled);
+    }
 
-	public boolean isEnabled() {
-		return mEnabled;
-	}
+    public boolean isEnabled() {
+        return mEnabled;
+    }
 
-	/**
-	 * Override to perform clean up of resources before shutdown.
-	 */
-	public void onDetach() {
-	}
+    public void setEnableHandler(EnableHandler handler) {
+        mHandler = handler;
+    }
 
-	public Map map() {
-		return mMap;
-	}
+    /**
+     * Override to perform clean up of resources before shutdown.
+     */
+    public void onDetach() {
+    }
+
+    public Map map() {
+        return mMap;
+    }
+
+    public interface EnableHandler {
+        void changed(boolean enabled);
+    }
 }

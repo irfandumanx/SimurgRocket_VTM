@@ -1,5 +1,9 @@
 /*
  * Copyright 2012, 2013 Hannes Janetzek
+ * Copyright 2017 Wolfgang Schramm
+ * Copyright 2017-2018 devemux86
+ * Copyright 2017 Andrey Novikov
+ * Copyright 2018 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -21,114 +25,150 @@ import org.oscim.event.Event;
 import org.oscim.layers.Layer;
 import org.oscim.layers.tile.MapTile;
 import org.oscim.layers.tile.TileManager;
+import org.oscim.layers.tile.ZoomLimiter;
 import org.oscim.layers.tile.vector.VectorTileLayer;
 import org.oscim.map.Map;
+import org.oscim.map.Viewport;
 import org.oscim.utils.async.SimpleWorker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class LabelLayer extends Layer implements Map.UpdateListener, TileManager.Listener {
+public class LabelLayer extends Layer implements Map.UpdateListener, TileManager.Listener,
+        ZoomLimiter.IZoomLimiter {
 
-	static final Logger log = LoggerFactory.getLogger(LabelLayer.class);
+    static final Logger log = LoggerFactory.getLogger(LabelLayer.class);
 
-	public final static String LABEL_DATA = LabelLayer.class.getName();
+    static final String LABEL_DATA = LabelLayer.class.getName();
 
-	private final static long MAX_RELABEL_DELAY = 100;
+    private static final long MAX_RELABEL_DELAY = 100;
 
-	private final LabelPlacement mLabelPlacer;
-	private final Worker mWorker;
+    // Sane default to allow render themes to work
+    private static final int ZOOM_LIMIT = Viewport.MAX_ZOOM_LEVEL;
 
-	public LabelLayer(Map map, VectorTileLayer l) {
-		super(map);
-		l.getManager().events.bind(this);
-		l.addHook(new LabelTileLoaderHook());
+    private final LabelPlacement mLabelPlacer;
+    private final Worker mWorker;
+    private final ZoomLimiter mZoomLimiter;
 
-		mLabelPlacer = new LabelPlacement(map, l.tileRenderer());
-		mWorker = new Worker(map);
-		mRenderer = new TextRenderer(mWorker);
-	}
+    public LabelLayer(Map map, VectorTileLayer l) {
+        this(map, l, new LabelTileLoaderHook());
+    }
 
-	class Worker extends SimpleWorker<LabelTask> {
+    public LabelLayer(Map map, VectorTileLayer l, VectorTileLayer.TileLoaderThemeHook h) {
+        this(map, l, h, ZOOM_LIMIT);
+    }
 
-		public Worker(Map map) {
-			super(map, 50, new LabelTask(), new LabelTask());
-		}
+    public LabelLayer(Map map, VectorTileLayer l, VectorTileLayer.TileLoaderThemeHook h,
+                      int zoomLimit) {
+        super(map);
+        l.getManager().events.bind(this);
+        l.addHook(h);
 
-		@Override
-		public boolean doWork(LabelTask t) {
+        mZoomLimiter = new ZoomLimiter(l.getManager(), map.viewport().getMinZoomLevel(),
+                map.viewport().getMaxZoomLevel(), zoomLimit);
 
-			if (mLabelPlacer.updateLabels(t)) {
-				mMap.render();
-				return true;
-			}
+        mLabelPlacer = new LabelPlacement(map, l.tileRenderer(), mZoomLimiter);
+        mWorker = new Worker(map);
+        mRenderer = new TextRenderer(mWorker);
+    }
 
-			return false;
-		}
+    class Worker extends SimpleWorker<LabelTask> {
 
-		@Override
-		public void cleanup(LabelTask t) {
-		}
+        public Worker(Map map) {
+            super(map, 50, new LabelTask(), new LabelTask());
+        }
 
-		@Override
-		public void finish() {
-			mLabelPlacer.cleanup();
-		}
+        @Override
+        public boolean doWork(LabelTask t) {
 
-		public synchronized boolean isRunning() {
-			return mRunning;
-		}
-	}
+            if (mLabelPlacer.updateLabels(t)) {
+                mMap.render();
+                return true;
+            }
 
-	public void clearLabels() {
-		mWorker.cancel(true);
-	}
+            return false;
+        }
 
-	public void update() {
-		mWorker.submit(MAX_RELABEL_DELAY);
-	}
+        @Override
+        public void cleanup(LabelTask t) {
+        }
 
-	@Override
-	public void onDetach() {
-		mWorker.cancel(true);
-		super.onDetach();
-	}
+        @Override
+        public void finish() {
+            mLabelPlacer.cleanup();
+        }
 
-	@Override
-	public void onMapEvent(Event event, MapPosition mapPosition) {
+        @Override
+        public synchronized boolean isRunning() {
+            return mRunning;
+        }
+    }
 
-		if (event == Map.CLEAR_EVENT)
-			mWorker.cancel(true);
+    @Override
+    public void addZoomLimit() {
+        mZoomLimiter.addZoomLimit();
+    }
 
-		if (event == Map.POSITION_EVENT)
-			mWorker.submit(MAX_RELABEL_DELAY);
-	}
+    @Override
+    public void removeZoomLimit() {
+        mZoomLimiter.removeZoomLimit();
+    }
 
-	//	@Override
-	//	public void onMotionEvent(MotionEvent e) {
-	//		//	int action = e.getAction() & MotionEvent.ACTION_MASK;
-	//		//	if (action == MotionEvent.ACTION_POINTER_DOWN) {
-	//		//		multi++;
-	//		//		mTextRenderer.hold(true);
-	//		//	} else if (action == MotionEvent.ACTION_POINTER_UP) {
-	//		//		multi--;
-	//		//		if (multi == 0)
-	//		//			mTextRenderer.hold(false);
-	//		//	} else if (action == MotionEvent.ACTION_CANCEL) {
-	//		//		multi = 0;
-	//		//		log.debug("cancel " + multi);
-	//		//		mTextRenderer.hold(false);
-	//		//	}
-	//	}
+    public void clearLabels() {
+        mWorker.cancel(true);
+    }
 
-	@Override
-	public void onTileManagerEvent(Event e, MapTile tile) {
-		if (e == TileManager.TILE_LOADED) {
-			if (tile.isVisible)
-				mWorker.submit(MAX_RELABEL_DELAY / 4);
-			//log.debug("tile loaded: {}", tile);
-		} else if (e == TileManager.TILE_REMOVED) {
-			//log.debug("tile removed: {}", tile);
-		}
-	}
+    public void update() {
+        if (!isEnabled())
+            return;
+
+        mWorker.submit(MAX_RELABEL_DELAY);
+    }
+
+    @Override
+    public void onDetach() {
+        mWorker.cancel(true);
+        super.onDetach();
+    }
+
+    @Override
+    public void onMapEvent(Event event, MapPosition mapPosition) {
+
+        if (event == Map.CLEAR_EVENT)
+            mWorker.cancel(true);
+
+        if (!isEnabled())
+            return;
+
+        if (event == Map.POSITION_EVENT)
+            mWorker.submit(MAX_RELABEL_DELAY);
+    }
+
+    //    @Override
+    //    public void onMotionEvent(MotionEvent e) {
+    //        //    int action = e.getAction() & MotionEvent.ACTION_MASK;
+    //        //    if (action == MotionEvent.ACTION_POINTER_DOWN) {
+    //        //        multi++;
+    //        //        mTextRenderer.hold(true);
+    //        //    } else if (action == MotionEvent.ACTION_POINTER_UP) {
+    //        //        multi--;
+    //        //        if (multi == 0)
+    //        //            mTextRenderer.hold(false);
+    //        //    } else if (action == MotionEvent.ACTION_CANCEL) {
+    //        //        multi = 0;
+    //        //        log.debug("cancel " + multi);
+    //        //        mTextRenderer.hold(false);
+    //        //    }
+    //    }
+
+    @Override
+    public void onTileManagerEvent(Event e, MapTile tile) {
+        if (e == TileManager.TILE_LOADED) {
+            if (tile.isVisible && isEnabled())
+                mWorker.submit(MAX_RELABEL_DELAY / 4);
+            //log.debug("tile loaded: {}", tile);
+        } else if (e == TileManager.TILE_REMOVED) {
+            //log.debug("tile removed: {}", tile);
+        }
+    }
 
 }

@@ -1,5 +1,8 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 Andrey Novikov
+ * Copyright 2016-2022 devemux86
+ * Copyright 2017-2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,167 +19,227 @@
  */
 package org.oscim.core;
 
+import org.oscim.utils.Utils;
+
 import java.util.Arrays;
+import java.util.Collection;
 
 /**
  * The Class TagSet holds a set of Tags.
  */
 public class TagSet {
 
-	/** The Tags. */
-	public Tag[] tags;
+    /**
+     * The Tags.
+     */
+    private Tag[] tags;
 
-	/** The number of current Tags in set. */
-	public int numTags;
+    /**
+     * The number of current Tags in set.
+     */
+    private int numTags;
 
-	/**
-	 * Instantiates a new TagSet with initial size of 10.
-	 */
-	public TagSet() {
-		tags = new Tag[10];
-	}
+    /**
+     * Instantiates a new TagSet with initial size of 10.
+     */
+    public TagSet() {
+        tags = new Tag[10];
+    }
 
-	/**
-	 * Instantiates a new tag set initialized with the given size.
-	 * 
-	 * @param size the initial size.
-	 */
-	public TagSet(int size) {
-		tags = new Tag[size];
-	}
+    /**
+     * Instantiates a new tag set initialized with the given size.
+     *
+     * @param size the initial size.
+     */
+    public TagSet(int size) {
+        tags = new Tag[size];
+    }
 
-	/**
-	 * Reset the TagSet to contain 0 tags.
-	 */
-	public void clear() {
-		numTags = 0;
-	}
+    /**
+     * Reset the TagSet to contain 0 tags.
+     */
+    public void clear() {
+        numTags = 0;
+    }
 
-	/**
-	 * Clear. Reset the TagSet to contain 0 tags and null out tags.
-	 */
-	public void clearAndNullTags() {
-		Arrays.fill(tags, null);
-		numTags = 0;
-	}
+    /**
+     * @return Size of TagSet
+     */
+    public int size() {
+        return numTags;
+    }
 
-	/**
-	 * Return Tags contained in TagSet as new array.
-	 * 
-	 * @return the tag[]
-	 */
-	public Tag[] asArray() {
-		Tag[] result = new Tag[numTags];
-		System.arraycopy(tags, 0, result, 0, numTags);
-		return result;
-	}
+    /**
+     * Clear. Reset the TagSet to contain 0 tags and null out tags.
+     */
+    public void clearAndNullTags() {
+        Arrays.fill(tags, null);
+        numTags = 0;
+    }
 
-	/**
-	 * Find Tag by given key.
-	 * 
-	 * @param key the key as intern String.
-	 * @return the tag if found, null otherwise.
-	 */
-	public Tag get(String key) {
-		for (int i = 0; i < numTags; i++) {
-			if (tags[i].key == key)
-				return tags[i];
-		}
-		return null;
-	}
+    /**
+     * Return Tags contained in TagSet as new array.
+     *
+     * @return the tag[]
+     */
+    public Tag[] asArray() {
+        Tag[] result = new Tag[numTags];
+        System.arraycopy(tags, 0, result, 0, numTags);
+        return result;
+    }
 
-	/**
-	 * Checks if any tag has the key 'key'.
-	 * 
-	 * @param key the key as intern String.
-	 * @return true, iff any tag has the given key
-	 */
-	public boolean containsKey(String key) {
-		for (int i = 0; i < numTags; i++) {
-			if (tags[i].key == key)
-				return true;
-		}
-		return false;
-	}
+    /**
+     * Find Tag by given index.
+     *
+     * @param index the index of tag.
+     * @return the tag if found, null otherwise.
+     */
+    public Tag get(int index) {
+        if (index >= numTags) {
+            return null;
+        }
+        return tags[index];
+    }
 
-	/**
-	 * Get the value for a given key.
-	 * 
-	 * @param key the key as intern String
-	 * @return the value when found, null otherwise
-	 */
-	public String getValue(String key) {
-		for (int i = 0; i < numTags; i++) {
-			if (tags[i].key == key)
-				return tags[i].value;
-		}
-		return null;
-	}
+    /**
+     * Find Tag by given key.
+     *
+     * @param key the key as intern String.
+     * @return the tag if found, null otherwise.
+     */
+    public Tag get(String key) {
+        for (int i = 0; i < numTags; i++) {
+            if (Utils.equals(tags[i].key, key))
+                return tags[i];
+        }
+        return null;
+    }
 
-	/**
-	 * Adds the Tag tag to TagSet.
-	 * 
-	 * @param tag the Tag to be added
-	 */
-	public void add(Tag tag) {
-		if (numTags >= tags.length) {
-			Tag[] tmp = tags;
-			tags = new Tag[numTags + 4];
-			System.arraycopy(tmp, 0, tags, 0, numTags);
-		}
-		tags[numTags++] = tag;
-	}
+    /**
+     * Return Tags array contained in TagSet.
+     *
+     * @return the tags array.
+     */
+    public Tag[] getTags() {
+        return tags;
+    }
 
-	/**
-	 * Sets the tags from 'tagArray'.
-	 * 
-	 * @param tagArray the tag array
-	 */
-	public void set(Tag[] tagArray) {
-		int newTags = tagArray.length;
-		if (newTags > tags.length)
-			tags = new Tag[tagArray.length];
-		System.arraycopy(tagArray, 0, tags, 0, newTags);
+    /**
+     * Checks if any tag has the key 'key'.
+     *
+     * @param key the key as intern String.
+     * @return true, if any tag has the given key
+     */
+    public boolean containsKey(String key) {
+        for (int i = 0; i < numTags; i++) {
+            if (Utils.equals(tags[i].key, key))
+                return true;
+        }
+        return false;
+    }
 
-		numTags = newTags;
-	}
+    /**
+     * Get the value for a given key.
+     *
+     * @param key the key as intern String
+     * @return the value when found, null otherwise
+     */
+    public String getValue(String key) {
+        for (int i = 0; i < numTags; i++) {
+            if (Utils.equals(tags[i].key, key))
+                return tags[i].value;
+        }
+        return null;
+    }
 
-	/**
-	 * Checks if 'tag' is contained in TagSet.
-	 * 
-	 * @param tag the tag
-	 * @return true, iff tag is in TagSet
-	 */
-	public boolean contains(Tag tag) {
-		for (int i = 0; i < numTags; i++) {
-			Tag t = tags[i];
-			if ((t == tag) || (t.key == tag.key && t.value == tag.value))
-				return true;
-		}
-		return false;
-	}
+    /**
+     * Adds the Tag tag to TagSet.
+     *
+     * @param tag the Tag to be added
+     */
+    public void add(Tag tag) {
+        if (numTags >= tags.length) {
+            Tag[] tmp = tags;
+            tags = new Tag[numTags + 4];
+            System.arraycopy(tmp, 0, tags, 0, numTags);
+        }
+        tags[numTags++] = tag;
+    }
 
-	/**
-	 * Checks if a Tag with given key and value is contained in TagSet.
-	 * 
-	 * @param key the key as intern String
-	 * @param value the value as intern String
-	 * @return true, iff any tag has the given key and value
-	 */
-	public boolean contains(String key, String value) {
-		for (int i = 0; i < numTags; i++) {
-			if (tags[i].key == key)
-				return value.equals(tags[i].value);
-		}
-		return false;
-	}
+    /**
+     * Sets the tags from 'tagArray'.
+     *
+     * @param tagArray the tag array
+     */
+    public void set(Tag[] tagArray) {
+        int newTags = tagArray.length;
+        if (newTags > tags.length)
+            tags = new Tag[tagArray.length];
+        System.arraycopy(tagArray, 0, tags, 0, newTags);
 
-	@Override
-	public String toString() {
-		StringBuilder sb = new StringBuilder();
-		for (int i = 0; i < numTags; i++)
-			sb.append(tags[i]);
+        numTags = newTags;
+    }
 
-		return sb.toString();
-	}
+    /**
+     * Sets the tags from 'tagSet'.
+     *
+     * @param tagSet the tag set
+     */
+    public void set(TagSet tagSet) {
+        set(tagSet.getTags());
+        numTags = tagSet.numTags;
+    }
+
+    /**
+     * Checks if 'tag' is contained in TagSet.
+     *
+     * @param tag the tag
+     * @return true, iff tag is in TagSet
+     */
+    public boolean contains(Tag tag) {
+        for (int i = 0; i < numTags; i++) {
+            Tag t = tags[i];
+            if ((t == tag) || (Utils.equals(t.key, tag.key) && Utils.equals(t.value, tag.value)))
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * Checks if a Tag with given key and value is contained in TagSet.
+     *
+     * @param key   the key as intern String
+     * @param value the value as intern String
+     * @return true, iff any tag has the given key and value
+     */
+    public boolean contains(String key, String value) {
+        for (int i = 0; i < numTags; i++) {
+            if (Utils.equals(tags[i].key, key))
+                return Utils.equals(tags[i].value, value);
+        }
+        return false;
+    }
+
+    /**
+     * Checks if any tag is contained in TagSet.
+     *
+     * @param tags the tags
+     * @return true, iff any tag is in TagSet
+     */
+    public boolean contains(Collection<Tag> tags) {
+        for (Tag tag : tags) {
+            if (contains(tag))
+                return true;
+        }
+        return false;
+    }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < numTags; i++)
+            sb.append(tags[i]);
+
+        return sb.toString();
+    }
 }

@@ -1,5 +1,8 @@
 /*
  * Copyright 2014 Hannes Janetzek
+ * Copyright 2017 Longri
+ * Copyright 2017 devemux86
+ * Copyright 2018-2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,254 +19,318 @@
  */
 package org.oscim.theme;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-
 import org.oscim.core.GeometryBuffer.GeometryType;
+import org.oscim.core.Tag;
 import org.oscim.core.TagSet;
 import org.oscim.theme.rule.Rule;
 import org.oscim.theme.rule.Rule.Element;
 import org.oscim.theme.rule.Rule.RuleVisitor;
 import org.oscim.theme.styles.RenderStyle;
+import org.oscim.utils.ArrayUtils;
 import org.oscim.utils.LRUCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
 public class RenderTheme implements IRenderTheme {
-	static final Logger log = LoggerFactory.getLogger(RenderTheme.class);
+    static final Logger log = LoggerFactory.getLogger(RenderTheme.class);
 
-	private static final int MATCHING_CACHE_SIZE = 512;
+    private static final int MATCHING_CACHE_SIZE = 512;
 
-	private final float mBaseTextSize;
-	private final int mMapBackground;
+    private final float mBaseTextSize;
+    private final int mMapBackground;
 
-	private final int mLevels;
-	private final Rule[] mRules;
+    private final int mLevels;
+    private final Rule[] mRules;
+    private final boolean mMapsforgeTheme;
 
-	class RenderStyleCache {
-		final int matchType;
-		final LRUCache<MatchingCacheKey, RenderStyleItem> cache;
-		final MatchingCacheKey cacheKey;
+    private final Map<String, String> mTransformBackwardKeyMap, mTransformForwardKeyMap;
+    private final Map<Tag, Tag> mTransformBackwardTagMap, mTransformForwardTagMap;
 
-		/* temporary matching instructions list */
-		final ArrayList<RenderStyle> instructionList;
+    class RenderStyleCache {
+        final int matchType;
+        final LRUCache<MatchingCacheKey, RenderStyleItem> cache;
+        final MatchingCacheKey cacheKey;
 
-		RenderStyleItem prevItem;
+        /* temporary matching instructions list */
+        final ArrayList<RenderStyle> instructionList;
 
-		public RenderStyleCache(int type) {
-			cache = new LRUCache<MatchingCacheKey, RenderStyleItem>(MATCHING_CACHE_SIZE);
-			instructionList = new ArrayList<RenderStyle>(4);
-			cacheKey = new MatchingCacheKey();
-			matchType = type;
-		}
+        RenderStyleItem prevItem;
 
-		RenderStyleItem getRenderInstructions() {
-			return cache.get(cacheKey);
-		}
-	}
+        public RenderStyleCache(int type) {
+            cache = new LRUCache<MatchingCacheKey, RenderStyleItem>(MATCHING_CACHE_SIZE);
+            instructionList = new ArrayList<RenderStyle>(4);
+            cacheKey = new MatchingCacheKey();
+            matchType = type;
+        }
 
-	class RenderStyleItem {
-		RenderStyleItem next;
-		int zoom;
-		RenderStyle[] list;
-		MatchingCacheKey key;
-	}
+        RenderStyleItem getRenderInstructions() {
+            return cache.get(cacheKey);
+        }
+    }
 
-	private final RenderStyleCache[] mStyleCache;
+    class RenderStyleItem {
+        RenderStyleItem next;
+        int zoom;
+        RenderStyle[] list;
+        MatchingCacheKey key;
+    }
 
-	public RenderTheme(int mapBackground, float baseTextSize, Rule[] rules, int levels) {
-		if (rules == null)
-			throw new IllegalArgumentException("rules missing");
+    private final RenderStyleCache[] mStyleCache;
 
-		mMapBackground = mapBackground;
-		mBaseTextSize = baseTextSize;
-		mLevels = levels;
-		mRules = rules;
+    public RenderTheme(int mapBackground, float baseTextSize, Rule[] rules, int levels) {
+        this(mapBackground, baseTextSize, rules, levels, false);
+    }
 
-		mStyleCache = new RenderStyleCache[3];
-		mStyleCache[0] = new RenderStyleCache(Element.NODE);
-		mStyleCache[1] = new RenderStyleCache(Element.LINE);
-		mStyleCache[2] = new RenderStyleCache(Element.POLY);
-	}
+    public RenderTheme(int mapBackground, float baseTextSize, Rule[] rules, int levels,
+                       Map<String, String> transformKeyMap, Map<Tag, Tag> transformTagMap) {
+        this(mapBackground, baseTextSize, rules, levels, transformKeyMap, transformTagMap, false);
+    }
 
-	@Override
-	public void dispose() {
+    public RenderTheme(int mapBackground, float baseTextSize, Rule[] rules, int levels, boolean mapsforgeTheme) {
+        this(mapBackground, baseTextSize, rules, levels, null, null, mapsforgeTheme);
+    }
 
-		for (int i = 0; i < 3; i++)
-			mStyleCache[i].cache.clear();
+    public RenderTheme(int mapBackground, float baseTextSize, Rule[] rules, int levels,
+                       Map<String, String> transformKeyMap, Map<Tag, Tag> transformTagMap, boolean mapsforgeTheme) {
+        if (rules == null)
+            throw new IllegalArgumentException("rules missing");
 
-		for (Rule rule : mRules)
-			rule.dispose();
-	}
+        mMapBackground = mapBackground;
+        mBaseTextSize = baseTextSize;
+        mLevels = levels;
+        mRules = rules;
+        mMapsforgeTheme = mapsforgeTheme;
 
-	@Override
-	public int getLevels() {
-		return mLevels;
-	}
+        mTransformForwardKeyMap = transformKeyMap;
+        mTransformBackwardKeyMap = ArrayUtils.swap(transformKeyMap);
+        mTransformForwardTagMap = transformTagMap;
+        mTransformBackwardTagMap = ArrayUtils.swap(transformTagMap);
 
-	@Override
-	public int getMapBackground() {
-		return mMapBackground;
-	}
+        mStyleCache = new RenderStyleCache[3];
+        mStyleCache[0] = new RenderStyleCache(Element.NODE);
+        mStyleCache[1] = new RenderStyleCache(Element.LINE);
+        mStyleCache[2] = new RenderStyleCache(Element.POLY);
+    }
 
-	//AtomicInteger hitCount = new AtomicInteger(0);
-	//AtomicInteger missCount = new AtomicInteger(0);
-	//AtomicInteger sameCount = new AtomicInteger(0);
+    @Override
+    public void dispose() {
 
-	@Override
-	public RenderStyle[] matchElement(GeometryType geometryType, TagSet tags, int zoomLevel) {
+        for (int i = 0; i < 3; i++)
+            mStyleCache[i].cache.clear();
 
-		/* list of items in cache */
-		RenderStyleItem ris = null;
+        for (Rule rule : mRules)
+            rule.dispose();
+    }
 
-		/* the item matching tags and zoomlevel */
-		RenderStyleItem ri = null;
+    @Override
+    public int getLevels() {
+        return mLevels;
+    }
 
-		int type = geometryType.nativeInt;
-		if (type < 1 || type > 3) {
-			log.debug("invalid geometry type for RenderTheme " + geometryType.name());
-			return null;
-		}
+    @Override
+    public int getMapBackground() {
+        return mMapBackground;
+    }
 
-		RenderStyleCache cache = mStyleCache[type - 1];
+    Rule[] getRules() {
+        return mRules;
+    }
 
-		/* NOTE: maximum zoom level supported is 32 */
-		int zoomMask = 1 << zoomLevel;
+    @Override
+    public boolean isMapsforgeTheme() {
+        return mMapsforgeTheme;
+    }
 
-		synchronized (cache) {
+    //AtomicInteger hitCount = new AtomicInteger(0);
+    //AtomicInteger missCount = new AtomicInteger(0);
+    //AtomicInteger sameCount = new AtomicInteger(0);
 
-			if ((cache.prevItem == null) || (cache.prevItem.zoom & zoomMask) == 0) {
-				/* previous instructions zoom does not match */
-				cache.cacheKey.set(tags, null);
-			} else {
-				/* compare if tags match previous instructions */
-				if (cache.cacheKey.set(tags, cache.prevItem.key)) {
-					ri = cache.prevItem;
-					//log.debug(hitCount + "/" + sameCount.incrementAndGet()
-					//        + "/" + missCount + "same hit " + tags);
-				}
-			}
+    @Override
+    public RenderStyle[] matchElement(GeometryType geometryType, TagSet tags, int zoomLevel) {
 
-			if (ri == null) {
-				/* get instruction for current cacheKey */
-				ris = cache.getRenderInstructions();
+        /* list of items in cache */
+        RenderStyleItem ris = null;
 
-				for (ri = ris; ri != null; ri = ri.next) {
-					if ((ri.zoom & zoomMask) != 0) {
-						/* cache hit */
+        /* the item matching tags and zoomlevel */
+        RenderStyleItem ri = null;
 
-						//log.debug(hitCount.incrementAndGet()
-						//       + "/" + sameCount + "/" + missCount
-						//       + " cache hit " + tags);
-						break;
-					}
-				}
-			}
+        int type = geometryType.nativeInt;
+        if (type < 1 || type > 3) {
+            log.debug("invalid geometry type for RenderTheme " + geometryType.name());
+            return null;
+        }
 
-			if (ri == null) {
-				/* cache miss */
-				//missCount.incrementAndGet();
+        RenderStyleCache cache = mStyleCache[type - 1];
 
-				List<RenderStyle> matches = cache.instructionList;
-				matches.clear();
+        /* NOTE: maximum zoom level supported is 32 */
+        int zoomMask = 1 << zoomLevel;
 
-				for (Rule rule : mRules)
-					rule.matchElement(cache.matchType, cache.cacheKey.mTags, zoomMask, matches);
+        synchronized (cache) {
 
-				int size = matches.size();
-				if (size > 1) {
-					for (int i = 0; i < size - 1; i++) {
-						RenderStyle r = matches.get(i);
-						for (int j = i + 1; j < size; j++) {
-							if (matches.get(j) == r) {
-								log.debug("fix duplicate instruction! "
-								        + Arrays.deepToString(cache.cacheKey.mTags)
-								        + " zoom:" + zoomLevel + " "
-								        + r.getClass().getName());
-								matches.remove(j--);
-								size--;
-							}
-						}
-					}
-				}
-				/* check if same instructions are used in another level */
-				for (ri = ris; ri != null; ri = ri.next) {
-					if (size == 0) {
-						if (ri.list != null)
-							continue;
+            if ((cache.prevItem == null) || (cache.prevItem.zoom & zoomMask) == 0) {
+                /* previous instructions zoom does not match */
+                cache.cacheKey.set(tags, null);
+            } else {
+                /* compare if tags match previous instructions */
+                if (cache.cacheKey.set(tags, cache.prevItem.key)) {
+                    ri = cache.prevItem;
+                    //log.debug(hitCount + "/" + sameCount.incrementAndGet()
+                    //        + "/" + missCount + "same hit " + tags);
+                }
+            }
 
-						/* both matchinglists are empty */
-						break;
-					}
+            if (ri == null) {
+                /* get instruction for current cacheKey */
+                ris = cache.getRenderInstructions();
 
-					if (ri.list == null)
-						continue;
+                for (ri = ris; ri != null; ri = ri.next) {
+                    if ((ri.zoom & zoomMask) != 0) {
+                        /* cache hit */
 
-					if (ri.list.length != size)
-						continue;
+                        //log.debug(hitCount.incrementAndGet()
+                        //       + "/" + sameCount + "/" + missCount
+                        //       + " cache hit " + tags);
+                        break;
+                    }
+                }
+            }
 
-					int i = 0;
-					for (RenderStyle r : ri.list) {
-						if (r != matches.get(i))
-							break;
-						i++;
-					}
-					if (i == size)
-						/* both matching lists contain the same items */
-						break;
-				}
+            if (ri == null) {
+                /* cache miss */
+                //missCount.incrementAndGet();
 
-				if (ri != null) {
-					/* we found a same matchting list on another zoomlevel add
-					 * this zoom level to the existing RenderInstructionItem. */
-					ri.zoom |= zoomMask;
+                List<RenderStyle> matches = cache.instructionList;
+                matches.clear();
 
-					//log.debug(zoomLevel + " same instructions " + size + " "
-					//				+ Arrays.deepToString(tags));
-				} else {
-					//log.debug(zoomLevel + " new instructions " + size + " "
-					//				+ Arrays.deepToString(tags));
+                for (Rule rule : mRules)
+                    rule.matchElement(cache.matchType, cache.cacheKey.mTags, zoomMask, matches);
 
-					ri = new RenderStyleItem();
-					ri.zoom = zoomMask;
+                int size = matches.size();
+                if (size > 1) {
+                    for (int i = 0; i < size - 1; i++) {
+                        RenderStyle r = matches.get(i);
+                        for (int j = i + 1; j < size; j++) {
+                            if (matches.get(j) == r) {
+                                log.debug("fix duplicate instruction! "
+                                        + Arrays.deepToString(cache.cacheKey.mTags)
+                                        + " zoom:" + zoomLevel + " "
+                                        + r.getClass().getName());
+                                matches.remove(j--);
+                                size--;
+                            }
+                        }
+                    }
+                }
+                /* check if same instructions are used in another level */
+                for (ri = ris; ri != null; ri = ri.next) {
+                    if (size == 0) {
+                        if (ri.list != null)
+                            continue;
 
-					if (size > 0) {
-						ri.list = new RenderStyle[size];
-						matches.toArray(ri.list);
-					}
+                        /* both matchinglists are empty */
+                        break;
+                    }
 
-					/* attach this list to the one found for MatchingKey */
-					if (ris != null) {
-						ri.next = ris.next;
-						ri.key = ris.key;
-						ris.next = ri;
-					} else {
-						ri.key = new MatchingCacheKey(cache.cacheKey);
-						cache.cache.put(ri.key, ri);
-					}
-				}
-			}
-			cache.prevItem = ri;
-		}
-		return ri.list;
-	}
+                    if (ri.list == null)
+                        continue;
 
-	@Override
-	public void scaleTextSize(float scaleFactor) {
-		for (Rule rule : mRules)
-			rule.scaleTextSize(scaleFactor * mBaseTextSize);
-	}
+                    if (ri.list.length != size)
+                        continue;
 
-	@Override
-	public void updateStyles() {
-		for (Rule rule : mRules)
-			rule.updateStyles();
-	}
+                    int i = 0;
+                    for (RenderStyle r : ri.list) {
+                        if (r != matches.get(i))
+                            break;
+                        i++;
+                    }
+                    if (i == size)
+                        /* both matching lists contain the same items */
+                        break;
+                }
 
-	public void traverseRules(RuleVisitor visitor) {
-		for (Rule rule : mRules)
-			rule.apply(visitor);
-	}
+                if (ri != null) {
+                    /* we found a same matchting list on another zoomlevel add
+                     * this zoom level to the existing RenderInstructionItem. */
+                    ri.zoom |= zoomMask;
+
+                    //log.debug(zoomLevel + " same instructions " + size + " "
+                    //                + Arrays.deepToString(tags));
+                } else {
+                    //log.debug(zoomLevel + " new instructions " + size + " "
+                    //                + Arrays.deepToString(tags));
+
+                    ri = new RenderStyleItem();
+                    ri.zoom = zoomMask;
+
+                    if (size > 0) {
+                        ri.list = new RenderStyle[size];
+                        matches.toArray(ri.list);
+                    }
+
+                    /* attach this list to the one found for MatchingKey */
+                    if (ris != null) {
+                        ri.next = ris.next;
+                        ri.key = ris.key;
+                        ris.next = ri;
+                    } else {
+                        ri.key = new MatchingCacheKey(cache.cacheKey);
+                        cache.cache.put(ri.key, ri);
+                    }
+                }
+            }
+            cache.prevItem = ri;
+        }
+        return ri.list;
+    }
+
+    @Override
+    public void scaleTextSize(float scaleFactor) {
+        for (Rule rule : mRules)
+            rule.scaleTextSize(scaleFactor * mBaseTextSize);
+    }
+
+    @Override
+    public String transformBackwardKey(String key) {
+        if (mTransformBackwardKeyMap != null)
+            return mTransformBackwardKeyMap.get(key);
+        return null;
+    }
+
+    @Override
+    public String transformForwardKey(String key) {
+        if (mTransformForwardKeyMap != null)
+            return mTransformForwardKeyMap.get(key);
+        return null;
+    }
+
+    @Override
+    public Tag transformBackwardTag(Tag tag) {
+        if (mTransformBackwardTagMap != null)
+            return mTransformBackwardTagMap.get(tag);
+        return null;
+    }
+
+    @Override
+    public Tag transformForwardTag(Tag tag) {
+        if (mTransformForwardTagMap != null)
+            return mTransformForwardTagMap.get(tag);
+        return null;
+    }
+
+    @Override
+    public void updateStyles() {
+        for (Rule rule : mRules)
+            rule.updateStyles();
+    }
+
+    public void traverseRules(RuleVisitor visitor) {
+        for (Rule rule : mRules)
+            rule.apply(visitor);
+    }
 
 }

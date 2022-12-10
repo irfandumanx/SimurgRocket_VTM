@@ -1,5 +1,8 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2017 Andrey Novikov
+ * Copyright 2017-2020 devemux86
+ * Copyright 2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -31,114 +34,160 @@ import org.slf4j.LoggerFactory;
 
 public class BitmapTileLayer extends TileLayer {
 
-	protected static final Logger log = LoggerFactory.getLogger(BitmapTileLayer.class);
+    protected static final Logger log = LoggerFactory.getLogger(BitmapTileLayer.class);
 
-	private final static int CACHE_LIMIT = 40;
+    private static final int CACHE_LIMIT = 40;
 
-	protected final TileSource mTileSource;
+    /**
+     * Bitmap alpha in range 0 to 1.
+     */
+    private float mBitmapAlpha = 1.0f;
 
-	public static class FadeStep {
-		public final double scaleStart, scaleEnd;
-		public final float alphaStart, alphaEnd;
+    public static class FadeStep {
+        public final double scaleStart, scaleEnd;
+        public final double zoomStart, zoomEnd;
+        public final float alphaStart, alphaEnd;
 
-		public FadeStep(int zoomStart, int zoomEnd, float alphaStart, float alphaEnd) {
-			this.scaleStart = 1 << zoomStart;
-			this.scaleEnd = 1 << zoomEnd;
-			this.alphaStart = alphaStart;
-			this.alphaEnd = alphaEnd;
-		}
-	}
+        /**
+         * @param zoomStart  the zoom start in range {@value org.oscim.map.Viewport#MIN_ZOOM_LEVEL} to {@value org.oscim.map.Viewport#MAX_ZOOM_LEVEL}
+         * @param zoomEnd    the zoom end, must be greater than zoom start
+         * @param alphaStart the alpha start value in range 0 to 1
+         * @param alphaEnd   the alpha end value in range 0 to 1
+         */
+        public FadeStep(int zoomStart, int zoomEnd, float alphaStart, float alphaEnd) {
+            if (zoomEnd < zoomStart)
+                throw new IllegalArgumentException("zoomEnd must be larger than zoomStart");
+            this.scaleStart = 1 << zoomStart;
+            this.scaleEnd = 1 << zoomEnd;
+            this.zoomStart = zoomStart;
+            this.zoomEnd = zoomEnd;
+            this.alphaStart = alphaStart;
+            this.alphaEnd = alphaEnd;
+        }
 
-	public BitmapTileLayer(Map map, TileSource tileSource) {
-		this(map, tileSource, CACHE_LIMIT);
-	}
+        public FadeStep(double scaleStart, double scaleEnd, float alphaStart, float alphaEnd) {
+            if (scaleEnd < scaleStart)
+                throw new IllegalArgumentException("scaleEnd must be larger than scaleStart");
+            this.scaleStart = scaleStart;
+            this.scaleEnd = scaleEnd;
+            this.zoomStart = Math.log(scaleStart) / Math.log(2);
+            this.zoomEnd = Math.log(scaleEnd) / Math.log(2);
+            this.alphaStart = alphaStart;
+            this.alphaEnd = alphaEnd;
+        }
+    }
 
-	public BitmapTileLayer(Map map, TileSource tileSource, int cacheLimit) {
-		super(map,
-		      new TileManager(map, cacheLimit),
-		      new VectorTileRenderer());
+    public BitmapTileLayer(Map map, TileSource tileSource) {
+        this(map, tileSource, CACHE_LIMIT);
+    }
 
-		mTileManager.setZoomLevel(tileSource.getZoomLevelMin(),
-		                          tileSource.getZoomLevelMax());
+    public BitmapTileLayer(Map map, TileSource tileSource, float bitmapAlpha) {
+        this(map, tileSource, CACHE_LIMIT, bitmapAlpha);
+    }
 
-		mTileSource = tileSource;
-		initLoader(getNumLoaders());
-	}
+    public BitmapTileLayer(Map map, TileSource tileSource, int cacheLimit) {
+        this(map, tileSource, cacheLimit, tileSource.getAlpha());
+    }
 
-	@Override
-	public void onMapEvent(Event event, MapPosition pos) {
-		super.onMapEvent(event, pos);
+    public BitmapTileLayer(Map map, TileSource tileSource, int cacheLimit, float bitmapAlpha) {
+        super(map,
+                new TileManager(map, cacheLimit),
+                new VectorTileRenderer());
 
-		if (event != Map.POSITION_EVENT)
-			return;
+        mTileManager.setZoomLevel(tileSource.getZoomLevelMin(),
+                tileSource.getZoomLevelMax());
 
-		FadeStep[] fade = mTileSource.getFadeSteps();
+        mTileSource = tileSource;
+        setBitmapAlpha(bitmapAlpha, false);
+        initLoader(getNumLoaders());
+        setFade(map.getMapPosition());
+    }
 
-		if (fade == null) {
-			//mRenderLayer.setBitmapAlpha(1);
-			return;
-		}
+    public void setBitmapAlpha(float bitmapAlpha, boolean redraw) {
+        mBitmapAlpha = FastMath.clamp(bitmapAlpha, 0f, 1f);
+        tileRenderer().setBitmapAlpha(mBitmapAlpha);
+        if (redraw)
+            map().updateMap(true);
+    }
 
-		float alpha = 0;
-		for (FadeStep f : fade) {
-			if (pos.scale < f.scaleStart || pos.scale > f.scaleEnd)
-				continue;
+    @Override
+    public void onMapEvent(Event event, MapPosition pos) {
+        super.onMapEvent(event, pos);
 
-			if (f.alphaStart == f.alphaEnd) {
-				alpha = f.alphaStart;
-				break;
-			}
-			double range = f.scaleEnd / f.scaleStart;
-			float a = (float) ((range - (pos.scale / f.scaleStart)) / range);
-			a = FastMath.clamp(a, 0, 1);
-			// interpolate alpha between start and end
-			alpha = a * f.alphaStart + (1 - a) * f.alphaEnd;
-			break;
-		}
+        if (event != Map.POSITION_EVENT)
+            return;
 
-		tileRenderer().setBitmapAlpha(alpha);
-	}
+        setFade(pos);
+    }
 
-	@Override
-	protected TileLoader createLoader() {
-		return new BitmapTileLoader(this, mTileSource);
-	}
+    private void setFade(MapPosition pos) {
+        FadeStep[] fade = mTileSource.getFadeSteps();
 
-	@Override
-	public void onDetach() {
-		super.onDetach();
-		pool.clear();
-	}
+        if (fade == null) {
+            //mRenderLayer.setBitmapAlpha(1);
+            return;
+        }
 
-	final static int POOL_FILL = 20;
+        float alpha = mBitmapAlpha;
+        for (FadeStep f : fade) {
+            if (pos.scale < f.scaleStart || pos.scale > f.scaleEnd)
+                continue;
 
-	/** pool shared by TextLayers */
-	final TexturePool pool = new TexturePool(POOL_FILL) {
+            if (f.alphaStart == f.alphaEnd) {
+                alpha = f.alphaStart;
+                break;
+            }
+            // interpolate alpha between start and end
+            alpha = (float) (f.alphaStart + (pos.getZoom() - f.zoomStart) * (f.alphaEnd - f.alphaStart) / (f.zoomEnd - f.zoomStart));
+            break;
+        }
 
-		//		int sum = 0;
-		//
-		//		public TextureItem release(TextureItem item) {
-		//			log.debug(getFill() + " " + sum + " release tex " + item.id);
-		//			return super.release(item);
-		//		};
-		//
-		//		public synchronized TextureItem get() {
-		//			log.debug(getFill() + " " + sum + " get tex ");
-		//
-		//			return super.get();
-		//		};
-		//
-		//		protected TextureItem createItem() {
-		//			log.debug(getFill() + " " + (sum++) + " create tex ");
-		//
-		//			return super.createItem();
-		//		};
-		//
-		//		protected void freeItem(TextureItem t) {
-		//			log.debug(getFill() + " " + (sum--) + " free tex ");
-		//			super.freeItem(t);
-		//
-		//		};
-	};
+        alpha = FastMath.clamp(alpha, 0f, 1f) * mBitmapAlpha;
+        tileRenderer().setBitmapAlpha(alpha);
+    }
+
+    @Override
+    protected TileLoader createLoader() {
+        return new BitmapTileLoader(this, mTileSource);
+    }
+
+    @Override
+    public void onDetach() {
+        super.onDetach();
+        pool.clear();
+    }
+
+    static final int POOL_FILL = 20;
+
+    /**
+     * pool shared by TextLayers
+     */
+    final TexturePool pool = new TexturePool(POOL_FILL) {
+
+        //        int sum = 0;
+        //
+        //        public TextureItem release(TextureItem item) {
+        //            log.debug(getFill() + " " + sum + " release tex " + item.id);
+        //            return super.release(item);
+        //        };
+        //
+        //        public synchronized TextureItem get() {
+        //            log.debug(getFill() + " " + sum + " get tex ");
+        //
+        //            return super.get();
+        //        };
+        //
+        //        protected TextureItem createItem() {
+        //            log.debug(getFill() + " " + (sum++) + " create tex ");
+        //
+        //            return super.createItem();
+        //        };
+        //
+        //        protected void freeItem(TextureItem t) {
+        //            log.debug(getFill() + " " + (sum--) + " free tex ");
+        //            super.freeItem(t);
+        //
+        //        };
+    };
 
 }

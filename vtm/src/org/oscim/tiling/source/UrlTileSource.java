@@ -1,5 +1,7 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2018 devemux86
+ * Copyright 2016 Izumi Kawashima
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,172 +18,210 @@
  */
 package org.oscim.tiling.source;
 
+import org.oscim.core.Tile;
+import org.oscim.map.Viewport;
+import org.oscim.tiling.TileSource;
+import org.oscim.tiling.source.LwHttp.LwHttpFactory;
+
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Collections;
 import java.util.Map;
 
-import org.oscim.core.Tile;
-import org.oscim.tiling.TileSource;
-import org.oscim.tiling.source.LwHttp.LwHttpFactory;
-
 public abstract class UrlTileSource extends TileSource {
 
-	public abstract static class Builder<T extends Builder<T>> extends TileSource.Builder<T> {
-		protected String tilePath;
-		protected String url;
-		private HttpEngine.Factory engineFactory;
+    public abstract static class Builder<T extends Builder<T>> extends TileSource.Builder<T> {
+        protected String tilePath;
+        protected String url;
+        private HttpEngine.Factory engineFactory;
+        private String keyName = "key";
+        private String apiKey;
 
-		protected Builder() {
+        protected Builder() {
+        }
 
-		}
+        protected Builder(String url, String tilePath) {
+            this.url = url;
+            this.tilePath = tilePath;
+        }
 
-		protected Builder(String url, String tilePath, int zoomMin, int zoomMax) {
-			this.url = url;
-			this.tilePath = tilePath;
-			this.zoomMin = zoomMin;
-			this.zoomMax = zoomMax;
-		}
+        protected Builder(String url, String tilePath, int zoomMin, int zoomMax) {
+            this(url, tilePath);
+            this.zoomMin = zoomMin;
+            this.zoomMax = zoomMax;
+        }
 
-		public T tilePath(String tilePath) {
-			this.tilePath = tilePath;
-			return self();
-		}
+        public T keyName(String keyName) {
+            this.keyName = keyName;
+            return self();
+        }
 
-		public T url(String url) {
-			this.url = url;
-			return self();
-		}
+        public T apiKey(String apiKey) {
+            this.apiKey = apiKey;
+            return self();
+        }
 
-		public T httpFactory(HttpEngine.Factory factory) {
-			this.engineFactory = factory;
-			return self();
-		}
+        public T tilePath(String tilePath) {
+            this.tilePath = tilePath;
+            return self();
+        }
 
-	}
+        public T url(String url) {
+            this.url = url;
+            return self();
+        }
 
-	public final static TileUrlFormatter URL_FORMATTER = new DefaultTileUrlFormatter();
-	private final URL mUrl;
-	private final String[] mTilePath;
+        public T httpFactory(HttpEngine.Factory factory) {
+            this.engineFactory = factory;
+            return self();
+        }
 
-	private HttpEngine.Factory mHttpFactory;
-	private Map<String, String> mRequestHeaders = Collections.emptyMap();
-	private TileUrlFormatter mTileUrlFormatter = URL_FORMATTER;
+    }
 
-	public interface TileUrlFormatter {
-		public String formatTilePath(UrlTileSource tileSource, Tile tile);
-	}
+    public static final TileUrlFormatter URL_FORMATTER = new DefaultTileUrlFormatter();
+    private final URL mUrl;
+    private final String[] mTilePath;
 
-	protected UrlTileSource(Builder<?> builder) {
-		super(builder);
-		mUrl = makeUrl(builder.url);
-		mTilePath = builder.tilePath.split("\\{|\\}");
-		mHttpFactory = builder.engineFactory;
-	}
+    private HttpEngine.Factory mHttpFactory;
+    private Map<String, String> mRequestHeaders = Collections.emptyMap();
+    private TileUrlFormatter mTileUrlFormatter = URL_FORMATTER;
+    private String mKeyName = "key";
+    private String mApiKey;
 
-	protected UrlTileSource(String urlString, String tilePath) {
-		this(urlString, tilePath, 0, 17);
-	}
+    public interface TileUrlFormatter {
+        String formatTilePath(UrlTileSource tileSource, Tile tile);
+    }
 
-	protected UrlTileSource(String urlString, String tilePath, int zoomMin, int zoomMax) {
-		super(zoomMin, zoomMax);
-		mUrl = makeUrl(urlString);
-		mTilePath = makeTilePath(tilePath);
-	}
+    protected UrlTileSource(Builder<?> builder) {
+        super(builder);
+        mKeyName = builder.keyName;
+        mApiKey = builder.apiKey;
+        mUrl = makeUrl(builder.url);
+        mTilePath = builder.tilePath.split("\\{|\\}");
+        mHttpFactory = builder.engineFactory;
+    }
 
-	private String[] makeTilePath(String tilePath) {
-		if (tilePath == null)
-			throw new IllegalArgumentException("tilePath cannot be null.");
+    protected UrlTileSource(String urlString, String tilePath) {
+        this(urlString, tilePath, Viewport.MIN_ZOOM_LEVEL, Viewport.MAX_ZOOM_LEVEL);
+    }
 
-		return tilePath.split("\\{|\\}");
-	}
+    protected UrlTileSource(String urlString, String tilePath, int zoomMin, int zoomMax) {
+        super(zoomMin, zoomMax);
+        mUrl = makeUrl(urlString);
+        mTilePath = makeTilePath(tilePath);
+    }
 
-	private URL makeUrl(String urlString) {
-		URL url = null;
-		try {
-			url = new URL(urlString);
-		} catch (MalformedURLException e) {
-			throw new IllegalArgumentException(e);
-		}
-		return url;
-	}
+    private String[] makeTilePath(String tilePath) {
+        if (tilePath == null)
+            throw new IllegalArgumentException("tilePath cannot be null.");
 
-	@Override
-	public OpenResult open() {
-		return OpenResult.SUCCESS;
-	}
+        return tilePath.split("\\{|\\}");
+    }
 
-	@Override
-	public void close() {
+    private URL makeUrl(String urlString) {
+        URL url;
+        try {
+            url = new URL(urlString);
+        } catch (MalformedURLException e) {
+            throw new IllegalArgumentException(e);
+        }
+        return url;
+    }
 
-	}
+    @Override
+    public OpenResult open() {
+        return OpenResult.SUCCESS;
+    }
 
-	public URL getUrl() {
-		return mUrl;
-	}
+    @Override
+    public void close() {
 
-	public String getTileUrl(Tile tile) {
-		return mUrl + mTileUrlFormatter.formatTilePath(this, tile);
-	}
+    }
 
-	public void setHttpEngine(HttpEngine.Factory httpFactory) {
-		mHttpFactory = httpFactory;
-	}
+    public void setApiKey(String apiKey) {
+        mApiKey = apiKey;
+    }
 
-	public void setHttpRequestHeaders(Map<String, String> options) {
-		mRequestHeaders = options;
-	}
+    public URL getUrl() {
+        return mUrl;
+    }
 
-	public Map<String, String> getRequestHeader() {
-		return mRequestHeaders;
-	}
+    public String getTileUrl(Tile tile) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(mUrl).append(mTileUrlFormatter.formatTilePath(this, tile));
+        if (mApiKey != null) {
+            sb.append("?").append(mKeyName).append("=").append(mApiKey);
+        }
+        return sb.toString();
+    }
 
-	public String[] getTilePath() {
-		return mTilePath;
-	}
+    public void setHttpEngine(HttpEngine.Factory httpFactory) {
+        mHttpFactory = httpFactory;
+    }
 
-	/**
-	 * 
-	 */
-	public void setUrlFormatter(TileUrlFormatter formatter) {
-		mTileUrlFormatter = formatter;
-	}
+    public void setHttpRequestHeaders(Map<String, String> options) {
+        mRequestHeaders = options;
+    }
 
-	public TileUrlFormatter getUrlFormatter() {
-		return mTileUrlFormatter;
-	}
+    public Map<String, String> getRequestHeader() {
+        return mRequestHeaders;
+    }
 
-	public HttpEngine getHttpEngine() {
-		if (mHttpFactory == null) {
-			mHttpFactory = new LwHttpFactory();
-		}
-		return mHttpFactory.create(this);
-	}
+    public String[] getTilePath() {
+        return mTilePath;
+    }
 
-	static class DefaultTileUrlFormatter implements TileUrlFormatter {
-		@Override
-		public String formatTilePath(UrlTileSource tileSource, Tile tile) {
+    public void setUrlFormatter(TileUrlFormatter formatter) {
+        mTileUrlFormatter = formatter;
+    }
 
-			StringBuilder sb = new StringBuilder();
-			for (String b : tileSource.getTilePath()) {
-				if (b.length() == 1) {
-					switch (b.charAt(0)) {
-						case 'X':
-							sb.append(tile.tileX);
-							continue;
-						case 'Y':
-							sb.append(tile.tileY);
-							continue;
-						case 'Z':
-							sb.append(tile.zoomLevel);
-							continue;
-						default:
-							break;
-					}
-				}
-				sb.append(b);
-			}
-			return sb.toString();
-		}
-	}
+    public TileUrlFormatter getUrlFormatter() {
+        return mTileUrlFormatter;
+    }
+
+    public HttpEngine getHttpEngine() {
+        if (mHttpFactory == null) {
+            mHttpFactory = new LwHttpFactory();
+        }
+        return mHttpFactory.create(this);
+    }
+
+    public int tileXToUrlX(int tileX) {
+        return tileX;
+    }
+
+    public int tileYToUrlY(int tileY) {
+        return tileY;
+    }
+
+    public int tileZToUrlZ(int tileZ) {
+        return tileZ;
+    }
+
+    private static class DefaultTileUrlFormatter implements TileUrlFormatter {
+        @Override
+        public String formatTilePath(UrlTileSource tileSource, Tile tile) {
+
+            StringBuilder sb = new StringBuilder();
+            for (String b : tileSource.getTilePath()) {
+                if (b.length() == 1) {
+                    switch (b.charAt(0)) {
+                        case 'X':
+                            sb.append(tileSource.tileXToUrlX(tile.tileX));
+                            continue;
+                        case 'Y':
+                            sb.append(tileSource.tileYToUrlY(tile.tileY));
+                            continue;
+                        case 'Z':
+                            sb.append(tileSource.tileZToUrlZ(tile.zoomLevel));
+                            continue;
+                        default:
+                            break;
+                    }
+                }
+                sb.append(b);
+            }
+            return sb.toString();
+        }
+    }
 }

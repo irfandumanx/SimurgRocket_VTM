@@ -1,5 +1,7 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2019 devemux86
+ * Copyright 2018-2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -18,22 +20,41 @@ package org.oscim.backend;
 
 public class GLAdapter {
 
-	public final static boolean debug = false;
-	public final static boolean debugView = false;
+    public static final boolean debug = false;
+    public static final boolean debugView = false;
 
-	/** The instance provided by backend */
-	public static GL gl;
+    /**
+     * The instance provided by backend
+     */
+    public static GL gl;
+    public static GL30 gl30;
 
-	public static boolean GDX_DESKTOP_QUIRKS = false;
-	public static boolean GDX_WEBGL_QUIRKS = false;
+    public static boolean ANDROID_QUIRKS = false;
+    public static boolean GDX_DESKTOP_QUIRKS = false;
+    public static boolean GDX_WEBGL_QUIRKS = false;
 
-	/**
-	 * Set true as workaround for adreno driver issue:
-	 * https://github.com/opensciencemap/vtm/issues/52
-	 */
-	public static boolean NO_BUFFER_SUB_DATA = false;
+    /**
+     * Set true as workaround for adreno driver issue:
+     * https://github.com/opensciencemap/vtm/issues/52
+     */
+    public static boolean NO_BUFFER_SUB_DATA = false;
 
-	public static void init(GL gl20) {
-		gl = gl20;
-	}
+    /**
+     * Draw circles with quads or points.
+     */
+    public static boolean CIRCLE_QUADS = false;
+
+    public static void init(GL gl) {
+        GLAdapter.gl = gl;
+        if (gl instanceof GL30)
+            GLAdapter.gl30 = (GL30) gl;
+
+        ANDROID_QUIRKS = (CanvasAdapter.platform == Platform.ANDROID);
+        GDX_DESKTOP_QUIRKS = CanvasAdapter.platform.isDesktop();
+        GDX_WEBGL_QUIRKS = (CanvasAdapter.platform == Platform.WEBGL);
+    }
+
+    public static boolean isGL30() {
+        return gl30 != null;
+    }
 }

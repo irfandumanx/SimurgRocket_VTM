@@ -1,5 +1,10 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 Stephan Leuschner
+ * Copyright 2016-2019 devemux86
+ * Copyright 2016 Izumi Kawashima
+ * Copyright 2017 Wolfgang Schramm
+ * Copyright 2018 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,258 +21,356 @@
  */
 package org.oscim.map;
 
+import org.oscim.backend.CanvasAdapter;
+import org.oscim.core.*;
+import org.oscim.renderer.MapRenderer;
+import org.oscim.utils.ThreadUtils;
+import org.oscim.utils.animation.Easing;
+import org.oscim.utils.async.Task;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import static org.oscim.core.MercatorProjection.latitudeToY;
 import static org.oscim.core.MercatorProjection.longitudeToX;
 import static org.oscim.utils.FastMath.clamp;
 
-import org.oscim.backend.CanvasAdapter;
-import org.oscim.core.BoundingBox;
-import org.oscim.core.GeoPoint;
-import org.oscim.core.MapPosition;
-import org.oscim.core.Point;
-import org.oscim.core.Tile;
-import org.oscim.renderer.MapRenderer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 public class Animator {
-	static final Logger log = LoggerFactory.getLogger(Animator.class);
+    static final Logger log = LoggerFactory.getLogger(Animator.class);
 
-	//static final Logger log = LoggerFactory.getLogger(MapAnimator.class);
+    public static final int ANIM_NONE = 0;
+    public static final int ANIM_MOVE = 1 << 0;
+    public static final int ANIM_SCALE = 1 << 1;
+    public static final int ANIM_ROTATE = 1 << 2;
+    public static final int ANIM_TILT = 1 << 3;
+    public static final int ANIM_FLING = 1 << 4;
 
-	private final static int ANIM_NONE = 0;
-	private final static int ANIM_MOVE = 1 << 0;
-	private final static int ANIM_SCALE = 1 << 1;
-	private final static int ANIM_ROTATE = 1 << 2;
-	private final static int ANIM_TILT = 1 << 3;
-	private final static int ANIM_FLING = 1 << 4;
+    final Map mMap;
 
-	private final Map mMap;
+    final MapPosition mCurPos = new MapPosition();
+    final MapPosition mStartPos = new MapPosition();
+    final MapPosition mDeltaPos = new MapPosition();
 
-	private final MapPosition mCurPos = new MapPosition();
-	private final MapPosition mStartPos = new MapPosition();
-	private final MapPosition mDeltaPos = new MapPosition();
+    private final Point mScroll = new Point();
+    final Point mPivot = new Point();
+    private final Point mVelocity = new Point();
 
-	private final Point mScroll = new Point();
-	private final Point mPivot = new Point();
-	private final Point mVelocity = new Point();
+    float mDuration = 500;
+    long mAnimEnd = -1;
+    Easing.Type mEasingType = Easing.Type.LINEAR;
 
-	private float mDuration = 500;
-	private long mAnimEnd = -1;
+    int mState = ANIM_NONE;
 
-	private int mState = ANIM_NONE;
+    public Animator(Map map) {
+        mMap = map;
+    }
 
-	public Animator(Map map) {
-		mMap = map;
-	}
+    public synchronized void animateTo(BoundingBox bbox) {
+        animateTo(1000, bbox);
+    }
 
-	public synchronized void animateTo(long duration, BoundingBox bbox) {
-		mMap.getMapPosition(mStartPos);
-		/* TODO for large distance first scale out, then in
-		 * calculate the maximum scale at which the BoundingBox
-		 * is completely visible */
-		double dx = Math.abs(longitudeToX(bbox.getMaxLongitude())
-		        - longitudeToX(bbox.getMinLongitude()));
+    public synchronized void animateTo(long duration, BoundingBox bbox) {
+        animateTo(duration, bbox, Easing.Type.LINEAR);
+    }
 
-		double dy = Math.abs(latitudeToY(bbox.getMinLatitude())
-		        - latitudeToY(bbox.getMaxLatitude()));
+    public synchronized void animateTo(long duration, BoundingBox bbox, Easing.Type easingType) {
+        animateTo(duration, bbox, easingType, ANIM_MOVE | ANIM_SCALE | ANIM_ROTATE | ANIM_TILT);
+    }
 
-		log.debug("anim bbox " + bbox);
+    public synchronized void animateTo(long duration, BoundingBox bbox, Easing.Type easingType, int state) {
+        ThreadUtils.assertMainThread();
 
-		double zx = mMap.getWidth() / (dx * Tile.SIZE);
-		double zy = mMap.getHeight() / (dy * Tile.SIZE);
-		double newScale = Math.min(zx, zy);
+        mMap.getMapPosition(mStartPos);
+        /* TODO for large distance first scale out, then in
+         * calculate the maximum scale at which the BoundingBox
+         * is completely visible */
+        double dx = Math.abs(longitudeToX(bbox.getMaxLongitude())
+                - longitudeToX(bbox.getMinLongitude()));
 
-		GeoPoint p = bbox.getCenterPoint();
+        double dy = Math.abs(latitudeToY(bbox.getMinLatitude())
+                - latitudeToY(bbox.getMaxLatitude()));
 
-		mDeltaPos.set(longitudeToX(p.getLongitude()) - mStartPos.x,
-		              latitudeToY(p.getLatitude()) - mStartPos.y,
-		              newScale - mStartPos.scale,
-		              -mStartPos.bearing,
-		              -mStartPos.tilt);
+        log.debug("anim bbox " + bbox);
 
-		animStart(duration, ANIM_MOVE | ANIM_SCALE | ANIM_ROTATE | ANIM_TILT);
-	}
+        double zx = mMap.getWidth() / (dx * Tile.SIZE);
+        double zy = mMap.getHeight() / (dy * Tile.SIZE);
+        double newScale = Math.min(zx, zy);
 
-	public synchronized void animateTo(BoundingBox bbox) {
-		animateTo(1000, bbox);
-	}
+        GeoPoint p = bbox.getCenterPoint();
 
-	public synchronized void animateTo(long duration, GeoPoint geoPoint,
-	        double scale, boolean relative) {
-		mMap.getMapPosition(mStartPos);
+        mDeltaPos.set(longitudeToX(p.getLongitude()) - mStartPos.x,
+                latitudeToY(p.getLatitude()) - mStartPos.y,
+                newScale - mStartPos.scale,
+                -mStartPos.bearing,
+                -mStartPos.tilt);
 
-		if (relative)
-			scale = mStartPos.scale * scale;
+        animStart(duration, state, easingType);
+    }
 
-		scale = clamp(scale, Viewport.MIN_SCALE, Viewport.MAX_SCALE);
+    public void animateTo(GeoPoint p) {
+        animateTo(500, p);
+    }
 
-		mDeltaPos.set(longitudeToX(geoPoint.getLongitude()) - mStartPos.x,
-		              latitudeToY(geoPoint.getLatitude()) - mStartPos.y,
-		              scale - mStartPos.scale,
-		              0, 0);
+    public void animateTo(long duration, GeoPoint p) {
+        animateTo(duration, p, 1, true);
+    }
 
-		animStart(duration, ANIM_MOVE | ANIM_SCALE);
-	}
+    /**
+     * Animate to GeoPoint
+     *
+     * @param duration in ms
+     * @param geoPoint
+     * @param scale
+     * @param relative alter scale relative to current scale
+     */
+    public void animateTo(long duration, GeoPoint geoPoint,
+                          double scale, boolean relative) {
+        animateTo(duration, geoPoint, scale, relative, Easing.Type.LINEAR);
+    }
 
-	public synchronized void animateTo(GeoPoint p) {
-		animateTo(500, p, 1, true);
-	}
+    /**
+     * Animate to GeoPoint
+     *
+     * @param duration   in ms
+     * @param geoPoint
+     * @param scale
+     * @param relative   alter scale relative to current scale
+     * @param easingType easing function
+     */
+    public void animateTo(long duration, GeoPoint geoPoint,
+                          double scale, boolean relative, Easing.Type easingType) {
+        animateTo(duration, geoPoint, scale, relative, easingType, ANIM_MOVE | ANIM_SCALE);
+    }
 
-	public synchronized void animateTo(long duration, MapPosition pos) {
-		mMap.getMapPosition(mStartPos);
+    /**
+     * Animate to GeoPoint
+     *
+     * @param duration   in ms
+     * @param geoPoint
+     * @param scale
+     * @param relative   alter scale relative to current scale
+     * @param easingType easing function
+     * @param state      animation state
+     */
+    public void animateTo(long duration, GeoPoint geoPoint,
+                          double scale, boolean relative, Easing.Type easingType, int state) {
+        ThreadUtils.assertMainThread();
 
-		pos.scale = clamp(pos.scale,
-		                  Viewport.MIN_SCALE,
-		                  Viewport.MAX_SCALE);
+        mMap.getMapPosition(mStartPos);
 
-		mDeltaPos.set(pos.x - mStartPos.x,
-		              pos.y - mStartPos.y,
-		              pos.scale - mStartPos.scale,
-		              pos.bearing - mStartPos.bearing,
-		              clamp(pos.tilt, 0, Viewport.MAX_TILT) - mStartPos.tilt);
+        if (relative)
+            scale = mStartPos.scale * scale;
 
-		animStart(duration, ANIM_MOVE | ANIM_SCALE | ANIM_ROTATE | ANIM_TILT);
-	}
+        scale = mMap.viewport().limitScale(scale);
 
-	public synchronized void animateZoom(long duration, double scaleBy,
-	        float pivotX, float pivotY) {
-		mMap.getMapPosition(mCurPos);
+        mDeltaPos.set(longitudeToX(geoPoint.getLongitude()) - mStartPos.x,
+                latitudeToY(geoPoint.getLatitude()) - mStartPos.y,
+                scale - mStartPos.scale,
+                0, 0);
 
-		if (mState == ANIM_SCALE)
-			scaleBy = (mStartPos.scale + mDeltaPos.scale) * scaleBy;
-		else
-			scaleBy = mCurPos.scale * scaleBy;
+        animStart(duration, state, easingType);
+    }
 
-		mStartPos.copy(mCurPos);
-		scaleBy = clamp(scaleBy, Viewport.MIN_SCALE, Viewport.MAX_SCALE);
+    public void animateTo(MapPosition pos) {
+        animateTo(500, pos);
+    }
 
-		mDeltaPos.scale = scaleBy - mStartPos.scale;
+    public void animateTo(long duration, MapPosition pos) {
+        animateTo(duration, pos, Easing.Type.LINEAR);
+    }
 
-		mPivot.x = pivotX;
-		mPivot.y = pivotY;
+    public void animateTo(long duration, MapPosition pos, Easing.Type easingType) {
+        animateTo(duration, pos, easingType, ANIM_MOVE | ANIM_SCALE | ANIM_ROTATE | ANIM_TILT);
+    }
 
-		animStart(duration, ANIM_SCALE);
-	}
+    public void animateTo(long duration, MapPosition pos, Easing.Type easingType, int state) {
+        ThreadUtils.assertMainThread();
 
-	public synchronized void animateFling(float velocityX, float velocityY,
-	        int xmin, int xmax, int ymin, int ymax) {
+        mMap.getMapPosition(mStartPos);
 
-		if (velocityX * velocityX + velocityY * velocityY < 2048)
-			return;
+        pos.scale = mMap.viewport().limitScale(pos.scale);
 
-		mMap.getMapPosition(mStartPos);
+        mDeltaPos.set(pos.x - mStartPos.x,
+                pos.y - mStartPos.y,
+                pos.scale - mStartPos.scale,
+                pos.bearing - mStartPos.bearing,
+                mMap.viewport().limitTilt(pos.tilt) - mStartPos.tilt);
 
-		mScroll.x = 0;
-		mScroll.y = 0;
+        animStart(duration, state, easingType);
+    }
 
-		float duration = 500;
+    public void animateZoom(long duration, double scaleBy,
+                            float pivotX, float pivotY) {
+        animateZoom(duration, scaleBy, pivotX, pivotY, Easing.Type.LINEAR);
+    }
 
-		float flingFactor = 240 / CanvasAdapter.dpi;
-		mVelocity.x = velocityX * flingFactor;
-		mVelocity.y = velocityY * flingFactor;
-		mVelocity.x = clamp(mVelocity.x, xmin, xmax);
-		mVelocity.y = clamp(mVelocity.y, ymin, ymax);
-		if (Double.isNaN(mVelocity.x) || Double.isNaN(mVelocity.y)) {
-			log.debug("fling NaN!");
-			return;
-		}
+    public void animateZoom(long duration, double scaleBy,
+                            float pivotX, float pivotY, Easing.Type easingType) {
+        ThreadUtils.assertMainThread();
 
-		animStart(duration, ANIM_FLING);
-	}
+        mMap.getMapPosition(mCurPos);
 
-	private void animStart(float duration, int state) {
-		mState = state;
-		mCurPos.copy(mStartPos);
-		mDuration = duration;
-		mAnimEnd = System.currentTimeMillis() + (long) duration;
-		mMap.render();
-	}
+        if (mState == ANIM_SCALE)
+            scaleBy = (mStartPos.scale + mDeltaPos.scale) * scaleBy;
+        else
+            scaleBy = mCurPos.scale * scaleBy;
 
-	private void animCancel() {
-		mState = ANIM_NONE;
-		mPivot.x = 0;
-		mPivot.y = 0;
-	}
+        mStartPos.copy(mCurPos);
+        scaleBy = mMap.viewport().limitScale(scaleBy);
+        if (scaleBy == 0.0)
+            return;
 
-	/**
-	 * called by MapRenderer at begin of each frame.
-	 */
-	public synchronized void updateAnimation() {
-		if (mState == ANIM_NONE)
-			return;
+        mDeltaPos.scale = scaleBy - mStartPos.scale;
 
-		long millisLeft = mAnimEnd - MapRenderer.frametime;
+        mPivot.x = pivotX;
+        mPivot.y = pivotY;
 
-		boolean changed = false;
+        animStart(duration, ANIM_SCALE, easingType);
+    }
 
-		ViewController v = mMap.viewport();
+    public void animateFling(float velocityX, float velocityY,
+                             int xmin, int xmax, int ymin, int ymax) {
 
-		synchronized (v) {
-			/* cancel animation when position was changed since last
-			 * update, i.e. when it was modified outside the animator. */
-			if (v.getMapPosition(mCurPos)) {
-				animCancel();
-				return;
-			}
+        ThreadUtils.assertMainThread();
 
-			float adv = clamp(1.0f - millisLeft / mDuration, 0, 1);
+        if (velocityX * velocityX + velocityY * velocityY < 2048)
+            return;
 
-			double scaleAdv = 1;
-			if ((mState & ANIM_SCALE) != 0) {
-				scaleAdv = doScale(v, adv);
-			}
+        mMap.getMapPosition(mStartPos);
 
-			if ((mState & ANIM_MOVE) != 0) {
-				v.moveTo(mStartPos.x + mDeltaPos.x * (adv / scaleAdv),
-				         mStartPos.y + mDeltaPos.y * (adv / scaleAdv));
-			}
+        mScroll.x = 0;
+        mScroll.y = 0;
 
-			if ((mState & ANIM_FLING) != 0) {
-				adv = (float) Math.sqrt(adv);
-				double dx = mVelocity.x * adv;
-				double dy = mVelocity.y * adv;
-				if ((dx - mScroll.x) != 0 || (dy - mScroll.y) != 0) {
-					v.moveMap((float) (dx - mScroll.x),
-					          (float) (dy - mScroll.y));
-					mScroll.x = dx;
-					mScroll.y = dy;
-				}
-			}
-			if ((mState & ANIM_ROTATE) != 0) {
-				v.setRotation(mStartPos.bearing + mDeltaPos.bearing * adv);
-			}
+        float duration = 500;
 
-			if ((mState & ANIM_TILT) != 0) {
-				v.setTilt(mStartPos.tilt + mDeltaPos.tilt * adv);
-			}
+        float flingFactor = CanvasAdapter.DEFAULT_DPI / CanvasAdapter.dpi;
+        mVelocity.x = velocityX * flingFactor;
+        mVelocity.y = velocityY * flingFactor;
+        mVelocity.x = clamp(mVelocity.x, xmin, xmax);
+        mVelocity.y = clamp(mVelocity.y, ymin, ymax);
+        if (Double.isNaN(mVelocity.x) || Double.isNaN(mVelocity.y)) {
+            log.debug("fling NaN!");
+            return;
+        }
 
-			if (millisLeft <= 0)
-				animCancel();
+        animStart(duration, ANIM_FLING, Easing.Type.SINE_OUT);
+    }
 
-			/* remember current map position */
-			changed = v.getMapPosition(mCurPos);
-		}
+    void animStart(float duration, int state, Easing.Type easingType) {
+        if (!isActive())
+            mMap.events.fire(Map.ANIM_START, mMap.mMapPosition);
+        mCurPos.copy(mStartPos);
+        mState = state;
+        mDuration = duration;
+        mAnimEnd = System.currentTimeMillis() + (long) duration;
+        mEasingType = easingType;
+        mMap.render();
+    }
 
-		if (changed) {
-			/* render and inform layers that position has changed */
-			mMap.updateMap(true);
-		} else {
-			/* just render next frame */
-			mMap.render();
-		}
-	}
+    /**
+     * called by MapRenderer at begin of each frame.
+     */
+    void updateAnimation() {
+        if (mState == ANIM_NONE)
+            return;
 
-	private double doScale(ViewController v, float adv) {
-		double newScale = mStartPos.scale + mDeltaPos.scale * Math.sqrt(adv);
+        long millisLeft = mAnimEnd - MapRenderer.frametime;
 
-		v.scaleMap((float) (newScale / mCurPos.scale),
-		           (float) mPivot.x, (float) mPivot.y);
+        ViewController v = mMap.viewport();
 
-		return newScale / (mStartPos.scale + mDeltaPos.scale);
-	}
+        /* cancel animation when position was changed since last
+         * update, i.e. when it was modified outside the animator. */
+        if (v.getMapPosition(mCurPos)) {
+            log.debug("cancel anim - changed");
+            cancel();
+            return;
+        }
 
-	public synchronized void cancel() {
-		mState = ANIM_NONE;
-	}
+        float adv = clamp(1.0f - millisLeft / mDuration, 1E-6f, 1);
+        // Avoid redundant calculations in case of linear easing
+        if (mEasingType != Easing.Type.LINEAR) {
+            adv = Easing.ease(0, (long) (adv * Long.MAX_VALUE), Long.MAX_VALUE, mEasingType);
+            adv = clamp(adv, 0, 1);
+        }
+
+        double scaleAdv = 1;
+        if ((mState & ANIM_SCALE) != 0) {
+            scaleAdv = doScale(v, adv);
+        }
+
+        if ((mState & ANIM_MOVE) != 0) {
+            v.moveTo(mStartPos.x + mDeltaPos.x * (adv / scaleAdv),
+                    mStartPos.y + mDeltaPos.y * (adv / scaleAdv));
+        }
+
+        if ((mState & ANIM_FLING) != 0) {
+            adv = (float) Math.sqrt(adv);
+            double dx = mVelocity.x * adv;
+            double dy = mVelocity.y * adv;
+            if ((dx - mScroll.x) != 0 || (dy - mScroll.y) != 0) {
+                v.moveMap((float) (dx - mScroll.x),
+                        (float) (dy - mScroll.y));
+                mScroll.x = dx;
+                mScroll.y = dy;
+            }
+        }
+        if ((mState & ANIM_ROTATE) != 0) {
+            v.setRotation(mStartPos.bearing + mDeltaPos.bearing * adv);
+        }
+
+        if ((mState & ANIM_TILT) != 0) {
+            v.setTilt(mStartPos.tilt + mDeltaPos.tilt * adv);
+        }
+
+        if (millisLeft <= 0) {
+            //log.debug("animate END");
+            cancel();
+        }
+
+        /* remember current map position */
+        final boolean changed = v.getMapPosition(mCurPos);
+
+        if (changed) {
+            mMap.updateMap(true);
+        } else {
+            mMap.postDelayed(updateTask, 10);
+        }
+    }
+
+    Task updateTask = new Task() {
+        @Override
+        public int go(boolean canceled) {
+            if (!canceled)
+                updateAnimation();
+            return Task.DONE;
+        }
+    };
+
+    double doScale(ViewController v, float adv) {
+        double newScale = mStartPos.scale + mDeltaPos.scale * adv;
+
+        v.scaleMap((float) (newScale / mCurPos.scale),
+                (float) mPivot.x, (float) mPivot.y);
+
+        return newScale / (mStartPos.scale + mDeltaPos.scale);
+    }
+
+    public void cancel() {
+        //ThreadUtils.assertMainThread();
+        mState = ANIM_NONE;
+        mPivot.x = 0;
+        mPivot.y = 0;
+        mMap.events.fire(Map.ANIM_END, mMap.mMapPosition);
+    }
+
+    public boolean isActive() {
+        return mState != ANIM_NONE;
+    }
+
+    /**
+     * Get the map position at animation end.<br>
+     * Note: valid only with animateTo methods.
+     */
+    public MapPosition getEndPosition() {
+        return mDeltaPos;
+    }
 }

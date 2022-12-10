@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,149 +17,213 @@
  */
 package org.oscim.utils;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class ArrayUtils {
 
-	public static <T> void reverse(T[] data) {
-		reverse(data, 0, data.length);
-	}
+    public static <T> void reverse(T[] data) {
+        reverse(data, 0, data.length);
+    }
 
-	public static <T> void reverse(T[] data, int left, int right) {
-		right--;
+    public static <T> void reverse(T[] data, int left, int right) {
+        right--;
 
-		while (left < right) {
-			T tmp = data[left];
-			data[left] = data[right];
-			data[right] = tmp;
+        while (left < right) {
+            T tmp = data[left];
+            data[left] = data[right];
+            data[right] = tmp;
 
-			left++;
-			right--;
-		}
-	}
+            left++;
+            right--;
+        }
+    }
 
-	public static void reverse(short[] data, int left, int right, int stride) {
-		right -= stride;
+    /**
+     * Reverse an array.
+     *
+     * @param data   the base array to be reversed
+     * @param left   the left index to be reversed
+     * @param right  the right index (excluded)
+     * @param stride the stride
+     */
+    public static <T> void reverse(T[] data, int left, int right, int stride) {
+        right -= stride;
 
-		while (left < right) {
-			for (int i = 0; i < stride; i++) {
-				short tmp = data[left + i];
-				data[left + i] = data[right + i];
-				data[right + i] = tmp;
-			}
-			left += stride;
-			right -= stride;
-		}
-	}
+        while (left < right) {
+            for (int i = 0; i < stride; i++) {
+                T tmp = data[left + i];
+                data[left + i] = data[right + i];
+                data[right + i] = tmp;
+            }
+            left += stride;
+            right -= stride;
+        }
+    }
 
-	public static void reverse(byte[] data, int left, int right) {
-		right -= 1;
+    /**
+     * Reverse the array for primitive short.
+     * see {@link #reverse(Object[], int, int, int)}
+     */
+    public static void reverse(short[] data, int left, int right, int stride) {
+        right -= stride;
 
-		while (left < right) {
-			byte tmp = data[left];
-			data[left] = data[right];
-			data[right] = tmp;
+        while (left < right) {
+            for (int i = 0; i < stride; i++) {
+                short tmp = data[left + i];
+                data[left + i] = data[right + i];
+                data[right + i] = tmp;
+            }
+            left += stride;
+            right -= stride;
+        }
+    }
 
-			left++;
-			right--;
-		}
-	}
+    /**
+     * Reverse the array for primitive float.
+     * see {@link #reverse(Object[], int, int, int)}
+     */
+    public static void reverse(float[] data, int left, int right, int stride) {
+        right -= stride;
 
-	public static double parseNumber(char[] str, int pos, int end) {
+        while (left < right) {
+            for (int i = 0; i < stride; i++) {
+                float tmp = data[left + i];
+                data[left + i] = data[right + i];
+                data[right + i] = tmp;
+            }
+            left += stride;
+            right -= stride;
+        }
+    }
 
-		boolean neg = false;
-		if (str[pos] == '-') {
-			neg = true;
-			pos++;
-		}
+    /**
+     * Reverse the array for primitive byte.
+     * see {@link #reverse(Object[], int, int, int)}
+     */
+    public static void reverse(byte[] data, int left, int right, int stride) {
+        right -= stride;
 
-		double val = 0;
-		int pre = 0;
-		char c = 0;
+        while (left < right) {
+            for (int i = 0; i < stride; i++) {
+                byte tmp = data[left + i];
+                data[left + i] = data[right + i];
+                data[right + i] = tmp;
+            }
+            left += stride;
+            right -= stride;
+        }
+    }
 
-		for (; pos < end; pos++, pre++) {
-			c = str[pos];
-			if (c < '0' || c > '9') {
-				if (pre == 0)
-					throw new NumberFormatException("s " + c);
+    public static double parseNumber(char[] str, int pos, int end) {
 
-				break;
-			}
-			val = val * 10 + (int) (c - '0');
-		}
+        boolean neg = false;
+        if (str[pos] == '-') {
+            neg = true;
+            pos++;
+        }
 
-		if (pre == 0)
-			throw new NumberFormatException();
+        double val = 0;
+        int pre = 0;
+        char c = 0;
 
-		if (c == '.') {
-			float div = 10;
-			for (pos++; pos < end; pos++) {
-				c = str[pos];
-				if (c < '0' || c > '9')
-					break;
-				val = val + ((int) (c - '0')) / div;
-				div *= 10;
-			}
-		}
+        for (; pos < end; pos++, pre++) {
+            c = str[pos];
+            if (c < '0' || c > '9') {
+                if (pre == 0)
+                    throw new NumberFormatException("s " + c);
 
-		if (c == 'e' || c == 'E') {
-			// advance 'e'
-			pos++;
+                break;
+            }
+            val = val * 10 + (int) (c - '0');
+        }
 
-			// check direction
-			int dir = 1;
-			if (str[pos] == '-') {
-				dir = -1;
-				pos++;
-			}
-			// skip leading zeros
-			for (; pos < end; pos++)
-				if (str[pos] != '0')
-					break;
+        if (pre == 0)
+            throw new NumberFormatException();
 
-			int shift = 0;
-			for (pre = 0; pos < end; pos++, pre++) {
-				c = str[pos];
-				if (c < '0' || c > '9') {
-					// nothing after 'e'
-					if (pre == 0)
-						throw new NumberFormatException("e " + c);
-					break;
-				}
-				shift = shift * 10 + (int) (c - '0');
-			}
+        if (c == '.') {
+            float div = 10;
+            for (pos++; pos < end; pos++) {
+                c = str[pos];
+                if (c < '0' || c > '9')
+                    break;
+                val = val + ((int) (c - '0')) / div;
+                div *= 10;
+            }
+        }
 
-			// guess it's ok for sane values of E
-			if (dir > 0) {
-				while (shift-- > 0)
-					val *= 10;
-			} else {
-				while (shift-- > 0)
-					val /= 10;
-			}
-		}
+        if (c == 'e' || c == 'E') {
+            // advance 'e'
+            pos++;
 
-		return neg ? -val : val;
-	}
+            // check direction
+            int dir = 1;
+            if (str[pos] == '-') {
+                dir = -1;
+                pos++;
+            }
+            // skip leading zeros
+            for (; pos < end; pos++)
+                if (str[pos] != '0')
+                    break;
 
-	public static boolean withinRange(float[] vec, float min, float max) {
-		for (int i = 0, n = vec.length; i < n; i++) {
-			float v = vec[i];
-			if (v < min || v > max)
-				return false;
-		}
-		return true;
-	}
+            int shift = 0;
+            for (pre = 0; pos < end; pos++, pre++) {
+                c = str[pos];
+                if (c < '0' || c > '9') {
+                    // nothing after 'e'
+                    if (pre == 0)
+                        throw new NumberFormatException("e " + c);
+                    break;
+                }
+                shift = shift * 10 + (int) (c - '0');
+            }
 
-	/**
-	 * Set bbox array to:
-	 * xmin, ymin,
-	 * xmin, ymax,
-	 * xmax, ymax,
-	 * xmax, ymin,
-	 */
-	public static void setBox2D(float[] bbox, float xmin, float ymin, float xmax, float ymax) {
-		bbox[0] = bbox[2] = xmin;
-		bbox[4] = bbox[6] = xmax;
-		bbox[1] = bbox[7] = ymin;
-		bbox[3] = bbox[5] = ymax;
-	}
+            // guess it's ok for sane values of E
+            if (dir > 0) {
+                while (shift-- > 0)
+                    val *= 10;
+            } else {
+                while (shift-- > 0)
+                    val /= 10;
+            }
+        }
+
+        return neg ? -val : val;
+    }
+
+    /**
+     * @return the Map with swapped keys and values
+     */
+    public static <K, V> Map<V, K> swap(Map<K, V> map) {
+        if (map == null)
+            return null;
+        Map<V, K> swap = new HashMap<>();
+        for (Map.Entry<K, V> entry : map.entrySet())
+            swap.put(entry.getValue(), entry.getKey());
+        return swap;
+    }
+
+    public static boolean withinRange(float[] vec, float min, float max) {
+        for (int i = 0, n = vec.length; i < n; i++) {
+            float v = vec[i];
+            if (v < min || v > max)
+                return false;
+        }
+        return true;
+    }
+
+    /**
+     * Set bbox array to:
+     * xmin, ymin,
+     * xmin, ymax,
+     * xmax, ymax,
+     * xmax, ymin,
+     */
+    public static void setBox2D(float[] bbox, float xmin, float ymin, float xmax, float ymax) {
+        bbox[0] = bbox[2] = xmin;
+        bbox[4] = bbox[6] = xmax;
+        bbox[1] = bbox[7] = ymin;
+        bbox[3] = bbox[5] = ymax;
+    }
 }

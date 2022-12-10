@@ -1,5 +1,8 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2017 Izumi Kawashima
+ * Copyright 2017 devemux86
+ * Copyright 2018-2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,255 +19,382 @@
  */
 package org.oscim.renderer;
 
-import static org.oscim.backend.GLAdapter.gl;
-
 import org.oscim.backend.GL;
 import org.oscim.core.Tile;
 import org.oscim.renderer.bucket.ExtrusionBucket;
 import org.oscim.renderer.bucket.ExtrusionBuckets;
+import org.oscim.renderer.bucket.RenderBuckets;
+import org.oscim.renderer.light.ShadowRenderer;
+import org.oscim.renderer.light.Sun;
 import org.oscim.utils.FastMath;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.oscim.backend.GLAdapter.gl;
+import static org.oscim.renderer.MapRenderer.COORD_SCALE;
+
 public abstract class ExtrusionRenderer extends LayerRenderer {
-	static final Logger log = LoggerFactory.getLogger(ExtrusionRenderer.class);
+    static final Logger log = LoggerFactory.getLogger(ExtrusionRenderer.class);
 
-	private final boolean mTranslucent;
-	private final int mMode;
-	private Shader mShader;
+    // Don't draw extrusions which are covered by others
+    private final boolean mTranslucent;
 
-	protected ExtrusionBuckets[] mExtrusionBucketSet = {};
-	protected int mBucketsCnt;
-	protected float mAlpha = 1;
+    private final boolean mMesh;
+    private Shader mShader;
 
-	public ExtrusionRenderer(boolean mesh, boolean alpha) {
-		mMode = mesh ? 1 : 0;
-		mTranslucent = alpha;
-	}
+    protected ExtrusionBuckets[] mExtrusionBucketSet = {};
+    protected int mBucketsCnt;
+    protected float mAlpha = 1;
 
-	public static class Shader extends GLShader {
-		int uMVP, uColor, uAlpha, uMode, aPos, aLight;
+    private float mZLimit = Float.MAX_VALUE;
 
-		public Shader(String shader) {
-			if (!create(shader))
-				return;
+    private Sun mSun;
+    private boolean mEnableCurrentSunPos;
+    private boolean mUseLight = true;
 
-			uMVP = getUniform("u_mvp");
-			uColor = getUniform("u_color");
-			uAlpha = getUniform("u_alpha");
-			uMode = getUniform("u_mode");
-			aPos = getAttrib("a_pos");
-			aLight = getAttrib("a_light");
-		}
-	}
+    public ExtrusionRenderer(boolean mesh, boolean translucent) {
+        mMesh = mesh;
+        mTranslucent = translucent;
 
-	@Override
-	public boolean setup() {
-		if (mMode == 0)
-			mShader = new Shader("extrusion_layer_ext");
-		else
-			mShader = new Shader("extrusion_layer_mesh");
+        mSun = new Sun();
+    }
 
-		return true;
-	}
+    public static class Shader extends GLShader {
+        /**
+         * The vertex position as attribute.
+         */
+        int aPos;
 
-	private void renderCombined(int vertexPointer, ExtrusionBuckets ebs) {
+        /**
+         * The normal of vertex's face as attribute.
+         */
+        int aNormal;
 
-		for (ExtrusionBucket eb = ebs.buckets(); eb != null; eb = eb.next()) {
+        /**
+         * The alpha value (e.g. for fading animation) as uniform.
+         */
+        int uAlpha;
 
-			gl.vertexAttribPointer(vertexPointer, 3,
-			                       GL.SHORT, false, 8,
-			                       eb.getVertexOffset());
+        /**
+         * The extrusion color(s) as uniform.
+         */
+        int uColor;
 
-			int sumIndices = eb.idx[0] + eb.idx[1] + eb.idx[2];
+        /**
+         * The lights position vector as uniform.
+         */
+        int uLight;
 
-			/* extrusion */
-			if (sumIndices > 0)
-				gl.drawElements(GL.TRIANGLES, sumIndices,
-				                GL.UNSIGNED_SHORT, eb.off[0]);
+        /**
+         * The shader render mode as uniform.
+         * <p>
+         * Extrusion shader:
+         * -1: translucent (depth buffer only)
+         * 0: draw roof
+         * 1: draw side one
+         * 2: draw side two
+         * 3: draw outline
+         */
+        int uMode;
 
-			/* mesh */
-			if (eb.idx[4] > 0) {
-				gl.drawElements(GL.TRIANGLES, eb.idx[4],
-				                GL.UNSIGNED_SHORT, eb.off[4]);
-			}
-		}
-	}
+        /**
+         * The model-view-projection matrix as uniform.
+         */
+        int uMVP;
 
-	@Override
-	public void render(GLViewport v) {
+        /**
+         * The height limit of extrusions as uniform.
+         */
+        int uZLimit;
 
-		float[] currentColor = null;
-		float currentAlpha = 0;
+        public Shader(String shader) {
+            this(shader, null);
+        }
 
-		gl.depthMask(true);
-		gl.clear(GL.DEPTH_BUFFER_BIT);
+        public Shader(String shader, String directives) {
+            if (!createDirective(shader, directives))
+                return;
 
-		GLState.test(true, false);
+            uMVP = getUniform("u_mvp");
+            uColor = getUniform("u_color");
+            uAlpha = getUniform("u_alpha");
+            uMode = getUniform("u_mode");
+            uZLimit = getUniform("u_zlimit");
+            aPos = getAttrib("a_pos");
+            aNormal = getAttrib("a_normal");
+            uLight = getUniform("u_light");
+        }
+    }
 
-		Shader s = mShader;
-		s.useProgram();
-		GLState.enableVertexArrays(s.aPos, -1);
+    public void enableCurrentSunPos(boolean enableSunPos) {
+        mEnableCurrentSunPos = enableSunPos;
+    }
 
-		/* only use face-culling when it's unlikely
-		 * that one'moves through the building' */
-		if (v.pos.zoomLevel < 18)
-			gl.enable(GL.CULL_FACE);
+    public Shader getShader() {
+        return mShader;
+    }
 
-		gl.depthFunc(GL.LESS);
-		gl.uniform1f(s.uAlpha, mAlpha);
+    public Sun getSun() {
+        return mSun;
+    }
 
-		ExtrusionBuckets[] ebs = mExtrusionBucketSet;
+    public boolean isMesh() {
+        return mMesh;
+    }
 
-		if (mTranslucent) {
-			/* only draw to depth buffer */
-			GLState.blend(false);
-			gl.colorMask(false, false, false, false);
-			gl.uniform1i(s.uMode, -1);
+    @Override
+    public boolean setup() {
+        if (!mMesh)
+            mShader = new Shader("extrusion_layer_ext");
+        else
+            mShader = new Shader("extrusion_layer_mesh");
 
-			for (int i = 0; i < mBucketsCnt; i++) {
-				if (ebs[i].ibo == null)
-					return;
+        return true;
+    }
 
-				ebs[i].ibo.bind();
-				ebs[i].vbo.bind();
+    @Override
+    public void update(GLViewport viewport) {
+        if (mEnableCurrentSunPos) {
+            float lat = (float) viewport.pos.getLatitude();
+            float lon = (float) viewport.pos.getLongitude();
+            if (FastMath.abs(mSun.getLatitude() - lat) > 0.2f
+                    || Math.abs(mSun.getLongitude() - lon) > 0.2f) {
+                // location is only updated if necessary (not every frame)
+                mSun.setCoordinates(lat, lon);
+            }
+            mSun.update();
+        }
+    }
 
-				setMatrix(s, v, ebs[i]);
+    private void renderCombined(int vertexPointer, ExtrusionBuckets ebs) {
 
-				float alpha = mAlpha * getFade(ebs[i]);
-				if (alpha != currentAlpha) {
-					gl.uniform1f(s.uAlpha, alpha);
-					currentAlpha = alpha;
-				}
+        for (ExtrusionBucket eb = ebs.buckets(); eb != null; eb = eb.next()) {
 
-				renderCombined(s.aPos, ebs[i]);
-			}
+            gl.vertexAttribPointer(vertexPointer, 3,
+                    GL.SHORT, false, RenderBuckets.SHORT_BYTES * 4,
+                    eb.getVertexOffset());
 
-			/* only draw to color buffer */
-			gl.colorMask(true, true, true, true);
-			gl.depthMask(false);
-			gl.depthFunc(GL.EQUAL);
-		}
+            int sumIndices = eb.idx[0] + eb.idx[1] + eb.idx[2];
 
-		GLState.blend(true);
+            /* extrusion (mMesh == false) */
+            if (sumIndices > 0)
+                gl.drawElements(GL.TRIANGLES, sumIndices,
+                        GL.UNSIGNED_SHORT, eb.off[0]);
 
-		GLState.enableVertexArrays(s.aPos, s.aLight);
+            /* mesh (mMesh == true) */
+            if (eb.idx[4] > 0) {
+                gl.drawElements(GL.TRIANGLES, eb.idx[4],
+                        GL.UNSIGNED_SHORT, eb.off[4]);
+            }
+        }
+    }
 
-		for (int i = 0; i < mBucketsCnt; i++) {
-			if (ebs[i].ibo == null)
-				continue;
+    @Override
+    public void render(GLViewport v) {
 
-			ebs[i].ibo.bind();
-			ebs[i].vbo.bind();
+        float[] currentColors = null;
+        float currentAlpha = 0;
 
-			if (!mTranslucent)
-				setMatrix(s, v, ebs[i]);
+        gl.depthMask(true);
+        gl.clear(GL.DEPTH_BUFFER_BIT);
 
-			float alpha = mAlpha * getFade(ebs[i]);
-			if (alpha != currentAlpha) {
-				gl.uniform1f(s.uAlpha, alpha);
-				currentAlpha = alpha;
-			}
+        GLState.test(true, false);
 
-			ExtrusionBucket eb = ebs[i].buckets();
+        Shader s = mShader;
+        s.useProgram();
+        GLState.enableVertexArrays(s.aPos, GLState.DISABLED);
 
-			for (; eb != null; eb = eb.next()) {
+        /* only use face-culling when it's unlikely
+         * that one'moves through the building' */
+        if (v.pos.zoomLevel < 18)
+            gl.enable(GL.CULL_FACE);
 
-				if (eb.colors != currentColor) {
-					currentColor = eb.colors;
-					GLUtils.glUniform4fv(s.uColor,
-					                     mMode == 0 ? 4 : 1,
-					                     eb.colors);
-				}
+        gl.depthFunc(GL.LESS);
+        gl.uniform1f(s.uAlpha, mAlpha);
+        gl.uniform1f(s.uZLimit, mZLimit);
+        GLUtils.glUniform3fv(s.uLight, 1, mSun.getPosition());
 
-				gl.vertexAttribPointer(s.aPos, 3, GL.SHORT,
-				                       false, 8, eb.getVertexOffset());
+        ExtrusionBuckets[] ebs = mExtrusionBucketSet;
 
-				gl.vertexAttribPointer(s.aLight, 2, GL.UNSIGNED_BYTE,
-				                       false, 8, eb.getVertexOffset() + 6);
+        if (mTranslucent) {
+            /* only draw to depth buffer */
+            GLState.blend(false);
+            gl.colorMask(false, false, false, false);
+            gl.uniform1i(s.uMode, -1);
 
-				/* draw extruded outlines */
-				if (eb.idx[0] > 0) {
-					if (mTranslucent) {
-						gl.depthFunc(GL.EQUAL);
-						setMatrix(s, v, ebs[i]);
-					}
+            for (int i = 0; i < mBucketsCnt; i++) {
+                if (ebs[i] == null)
+                    return;
+                if (ebs[i].ibo == null)
+                    return;
 
-					/* draw roof */
-					gl.uniform1i(s.uMode, 0);
-					gl.drawElements(GL.TRIANGLES, eb.idx[2],
-					                GL.UNSIGNED_SHORT, eb.off[2]);
+                ebs[i].ibo.bind();
+                ebs[i].vbo.bind();
 
-					/* draw sides 1 */
-					gl.uniform1i(s.uMode, 1);
-					gl.drawElements(GL.TRIANGLES, eb.idx[0],
-					                GL.UNSIGNED_SHORT, eb.off[0]);
+                setMatrix(s, v, ebs[i]);
 
-					/* draw sides 2 */
-					gl.uniform1i(s.uMode, 2);
-					gl.drawElements(GL.TRIANGLES, eb.idx[1],
-					                GL.UNSIGNED_SHORT, eb.off[1]);
+                float alpha = mAlpha * getFade(ebs[i]);
+                if (alpha != currentAlpha) {
+                    gl.uniform1f(s.uAlpha, alpha);
+                    currentAlpha = alpha;
+                }
 
-					if (mTranslucent) {
-						/* drawing gl_lines with the same coordinates
-						 * does not result in same depth values as
-						 * polygons, so add offset and draw gl_lequal */
-						gl.depthFunc(GL.LEQUAL);
-						v.mvp.addDepthOffset(100);
-						v.mvp.setAsUniform(s.uMVP);
-					}
+                renderCombined(s.aPos, ebs[i]);
+            }
 
-					gl.uniform1i(s.uMode, 3);
+            /* only draw to color buffer */
+            gl.colorMask(true, true, true, true);
+            gl.depthMask(false);
+            gl.depthFunc(GL.EQUAL);
+        }
 
-					gl.drawElements(GL.LINES, eb.idx[3],
-					                GL.UNSIGNED_SHORT, eb.off[3]);
-				}
+        // Depth cannot be transparent (in GL20)
+        GLState.blend(mUseLight);
 
-				/* draw triangle meshes */
-				if (eb.idx[4] > 0) {
-					gl.drawElements(GL.TRIANGLES, eb.idx[4],
-					                GL.UNSIGNED_SHORT, eb.off[4]);
-				}
-			}
+        GLState.enableVertexArrays(s.aPos, s.aNormal);
 
-			/* just a temporary reference! */
-			ebs[i] = null;
-		}
+        for (int i = 0; i < mBucketsCnt; i++) {
+            if (ebs[i].ibo == null)
+                continue;
 
-		if (!mTranslucent)
-			gl.depthMask(false);
+            ebs[i].ibo.bind();
+            ebs[i].vbo.bind();
 
-		if (v.pos.zoomLevel < 18)
-			gl.disable(GL.CULL_FACE);
-	}
+            if (!mTranslucent)
+                setMatrix(s, v, ebs[i]);
 
-	private float getFade(ExtrusionBuckets ebs) {
-		if (ebs.animTime == 0)
-			ebs.animTime = MapRenderer.frametime - 50;
+            float alpha = mAlpha * getFade(ebs[i]);
+            if (alpha != currentAlpha) {
+                gl.uniform1f(s.uAlpha, alpha);
+                currentAlpha = alpha;
+            }
 
-		return FastMath.clamp((float) (MapRenderer.frametime - ebs.animTime) / 300f, 0f, 1f);
-	}
+            ExtrusionBucket eb = ebs[i].buckets();
 
-	private void setMatrix(Shader s, GLViewport v, ExtrusionBuckets l) {
+            for (; eb != null; eb = eb.next()) {
 
-		int z = l.zoomLevel;
-		double curScale = Tile.SIZE * v.pos.scale;
-		float scale = (float) (v.pos.scale / (1 << z));
+                if (eb.getColors() != currentColors) {
+                    currentColors = eb.getColors();
+                    GLUtils.glUniform4fv(s.uColor,
+                            mMesh ? 1 : 4,
+                            currentColors);
+                }
 
-		float x = (float) ((l.x - v.pos.x) * curScale);
-		float y = (float) ((l.y - v.pos.y) * curScale);
+                gl.vertexAttribPointer(s.aPos, 3, GL.SHORT,
+                        false, RenderBuckets.SHORT_BYTES * 4, eb.getVertexOffset());
 
-		v.mvp.setTransScale(x, y, scale / MapRenderer.COORD_SCALE);
-		v.mvp.setValue(10, scale / 10);
-		v.mvp.multiplyLhs(v.viewproj);
+                if (mUseLight)
+                    gl.vertexAttribPointer(s.aNormal, 2, GL.UNSIGNED_BYTE,
+                            false, RenderBuckets.SHORT_BYTES * 4, eb.getVertexOffset() + RenderBuckets.SHORT_BYTES * 3);
 
-		if (mTranslucent) {
-			/* should avoid z-fighting of overlapping
-			 * building from different tiles */
-			int zoom = (1 << z);
-			int delta = (int) (l.x * zoom) % 4 + (int) (l.y * zoom) % 4 * 4;
-			v.mvp.addDepthOffset(delta);
-		}
-		v.mvp.setAsUniform(s.uMVP);
-	}
+                /* draw extruded outlines (mMesh == false) */
+                if (eb.idx[0] > 0) {
+                    if (mTranslucent) {
+                        gl.depthFunc(GL.EQUAL);
+                        setMatrix(s, v, ebs[i]);
+                    }
+
+                    /* draw roof */
+                    gl.uniform1i(s.uMode, 0);
+                    gl.drawElements(GL.TRIANGLES, eb.idx[2],
+                            GL.UNSIGNED_SHORT, eb.off[2]);
+
+                    /* draw sides 1 */
+                    gl.uniform1i(s.uMode, 1);
+                    gl.drawElements(GL.TRIANGLES, eb.idx[0],
+                            GL.UNSIGNED_SHORT, eb.off[0]);
+
+                    /* draw sides 2 */
+                    gl.uniform1i(s.uMode, 2);
+                    gl.drawElements(GL.TRIANGLES, eb.idx[1],
+                            GL.UNSIGNED_SHORT, eb.off[1]);
+
+                    if (mTranslucent) {
+                        /* drawing gl_lines with the same coordinates
+                         * does not result in same depth values as
+                         * polygons, so add offset and draw gl_lequal */
+                        gl.depthFunc(GL.LEQUAL);
+                        v.mvp.addDepthOffset(100);
+                        v.mvp.setAsUniform(s.uMVP);
+                    }
+
+                    gl.uniform1i(s.uMode, 3);
+
+                    gl.drawElements(GL.LINES, eb.idx[3],
+                            GL.UNSIGNED_SHORT, eb.off[3]);
+                }
+
+                /* draw triangle meshes (mMesh == true) */
+                if (eb.idx[4] > 0) {
+                    if (mTranslucent) {
+                        gl.depthFunc(GL.EQUAL);
+                        setMatrix(s, v, ebs[i]);
+                    }
+
+                    gl.drawElements(GL.TRIANGLES, eb.idx[4],
+                            GL.UNSIGNED_SHORT, eb.off[4]);
+                }
+            }
+
+            /* just a temporary reference! */
+            /* But for shadows we use them multiple times */
+            //ebs[i] = null;
+        }
+
+        if (!mTranslucent)
+            gl.depthMask(false);
+
+        if (v.pos.zoomLevel < 18)
+            gl.disable(GL.CULL_FACE);
+    }
+
+    private float getFade(ExtrusionBuckets ebs) {
+        if (ebs.animTime == 0)
+            ebs.animTime = MapRenderer.frametime - 50;
+
+        return FastMath.clamp((float) (MapRenderer.frametime - ebs.animTime) / 300f, 0f, 1f);
+    }
+
+    private void setMatrix(Shader s, GLViewport v, ExtrusionBuckets l) {
+
+        int z = l.zoomLevel;
+        double curScale = Tile.SIZE * v.pos.scale;
+        float scale = (float) (v.pos.scale / (1 << z));
+
+        float x = (float) ((l.x - v.pos.x) * curScale);
+        float y = (float) ((l.y - v.pos.y) * curScale);
+
+        // Create model matrix
+        v.mvp.setTransScale(x, y, scale / COORD_SCALE);
+        v.mvp.setValue(10, scale / 10);
+
+        // Create shadow map converter
+        // TODO may code it cleaner
+        if (s instanceof ShadowRenderer.Shader)
+            ((ShadowRenderer.Shader) s).setLightMVP(v.mvp);
+
+        // Apply model matrix to VP-Matrix
+        v.mvp.multiplyLhs(v.viewproj);
+
+        if (mTranslucent) {
+            /* should avoid z-fighting of overlapping
+             * building from different tiles */
+            int zoom = (1 << z);
+            int delta = (int) (l.x * zoom) % 4 + (int) (l.y * zoom) % 4 * 4;
+            v.mvp.addDepthOffset(delta);
+        }
+        v.mvp.setAsUniform(s.uMVP);
+    }
+
+    public void setShader(Shader shader) {
+        mShader = shader;
+    }
+
+    public void setZLimit(float zLimit) {
+        mZLimit = zLimit;
+    }
+
+    public void useLight(boolean useLight) {
+        mUseLight = useLight;
+    }
 }

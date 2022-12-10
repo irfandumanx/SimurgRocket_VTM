@@ -1,5 +1,7 @@
 /*
  * Copyright 2012 Hannes Janetzek
+ * Copyright 2017 Longri
+ * Copyright 2017 devemux86
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -24,43 +26,54 @@ import org.oscim.utils.pool.SyncPool;
 
 public class SymbolItem extends Inlist<SymbolItem> {
 
-	public final static SyncPool<SymbolItem> pool = new SyncPool<SymbolItem>(128) {
+    public static final SyncPool<SymbolItem> pool = new SyncPool<SymbolItem>(128) {
 
-		@Override
-		protected SymbolItem createItem() {
-			return new SymbolItem();
-		}
+        @Override
+        protected SymbolItem createItem() {
+            return new SymbolItem();
+        }
 
-		@Override
-		protected boolean clearItem(SymbolItem it) {
-			// drop references
-			it.bitmap = null;
-			it.texRegion = null;
-			it.offset = null;
-			return true;
-		}
-	};
+        @Override
+        protected boolean clearItem(SymbolItem it) {
+            // drop references
+            it.bitmap = null;
+            it.texRegion = null;
+            it.offset = null;
+            it.rotation = 0;
+            return true;
+        }
+    };
 
-	public boolean billboard;
-	public float x;
-	public float y;
+    public boolean billboard;
+    public float x;
+    public float y;
 
-	public TextureRegion texRegion;
-	public Bitmap bitmap;
-	public PointF offset;
+    public TextureRegion texRegion;
+    public Bitmap bitmap;
+    public PointF offset;
+    public float rotation;
 
-	public void set(float x, float y, TextureRegion texture, boolean billboard) {
-		this.x = x;
-		this.y = y;
-		this.texRegion = texture;
-		this.billboard = billboard;
-	}
+    public void set(float x, float y, TextureRegion texture, boolean billboard) {
+        set(x, y, texture, 0, billboard);
+    }
 
-	public void set(float x, float y, Bitmap bitmap, boolean billboard) {
-		this.x = x;
-		this.y = y;
-		this.bitmap = bitmap;
-		this.billboard = billboard;
-	}
+    public void set(float x, float y, TextureRegion texture, float rotation, boolean billboard) {
+        this.x = x;
+        this.y = y;
+        this.texRegion = texture;
+        this.rotation = rotation;
+        this.billboard = billboard;
+    }
 
+    public void set(float x, float y, Bitmap bitmap, boolean billboard) {
+        set(x, y, bitmap, 0, billboard);
+    }
+
+    public void set(float x, float y, Bitmap bitmap, float rotation, boolean billboard) {
+        this.x = x;
+        this.y = y;
+        this.bitmap = bitmap;
+        this.rotation = rotation;
+        this.billboard = billboard;
+    }
 }

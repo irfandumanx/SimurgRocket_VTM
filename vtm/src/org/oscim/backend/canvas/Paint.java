@@ -1,6 +1,9 @@
 /*
  * Copyright 2010, 2011, 2012 mapsforge.org
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 devemux86
+ * Copyright 2017 nebular
+ * Copyright 2018 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -22,45 +25,59 @@ package org.oscim.backend.canvas;
  */
 public interface Paint {
 
-	public static enum Align {
-		CENTER, LEFT, RIGHT;
-	}
+    enum Align {
+        CENTER, LEFT, RIGHT
+    }
 
-	public enum Cap {
-		BUTT, ROUND, SQUARE;
-	}
+    enum Cap {
+        BUTT, ROUND, SQUARE
+    }
 
-	public enum Style {
-		FILL, STROKE
-	}
+    enum Join {
+        MITER, ROUND, BEVEL
+    }
 
-	public enum FontFamily {
-		DEFAULT, DEFAULT_BOLD, MONOSPACE, SANS_SERIF, SERIF;
-	}
+    enum Style {
+        FILL, STROKE
+    }
 
-	public enum FontStyle {
-		BOLD, BOLD_ITALIC, ITALIC, NORMAL;
-	}
+    enum FontFamily {
+        DEFAULT, DEFAULT_BOLD, MONOSPACE, SANS_SERIF, SERIF, THIN, LIGHT, MEDIUM, BLACK, CONDENSED
+    }
 
-	int getColor();
+    enum FontStyle {
+        BOLD, BOLD_ITALIC, ITALIC, NORMAL
+    }
 
-	void setColor(int color);
+    int getColor();
 
-	void setStrokeCap(Cap cap);
+    void setColor(int color);
 
-	void setStrokeWidth(float width);
+    void setStrokeCap(Cap cap);
 
-	void setStyle(Style style);
+    void setStrokeJoin(Join join);
 
-	void setTextAlign(Align align);
+    void setStrokeWidth(float width);
 
-	void setTextSize(float textSize);
+    void setStyle(Style style);
 
-	void setTypeface(FontFamily fontFamily, FontStyle fontStyle);
+    void setTextAlign(Align align);
 
-	float measureText(String text);
+    void setTextSize(float textSize);
 
-	float getFontHeight();
+    void setTypeface(FontFamily fontFamily, FontStyle fontStyle);
 
-	float getFontDescent();
+    float measureText(String text);
+
+    float getFontHeight();
+
+    float getFontDescent();
+
+    float getStrokeWidth();
+
+    Style getStyle();
+
+    float getTextHeight(String text);
+
+    float getTextWidth(String text);
 }

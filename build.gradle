@@ -1,78 +1,38 @@
-if (!(new File("$rootDir/appcompat/build.gradle").exists())) {
-   throw new GradleException('Missing git sub modules!\nPLEASE RUN: "git submodule init && git submodule update"')
+plugins {
 }
-
-buildscript {
-  repositories {
-    mavenCentral()
-    mavenLocal()
-  }
-
-  dependencies {
-    classpath 'org.gradle.api.plugins:gradle-nexus-plugin:0.3'
-
-    classpath 'com.android.tools.build:gradle:1.0.1'
-
-    // for aar/maven stuff
-    // https://github.com/dcendents/android-maven-plugin
-    classpath 'com.github.dcendents:android-maven-plugin:1.2'
-  }
-}
-
-def filterProjects(filter) {
-  return subprojects.findAll { project -> filter.contains(project.name) }
-}
-
-task wrapper(type: Wrapper) {
-  gradleVersion = '2.3'
-}
-
-//apply from:'jdee.gradle'
 
 allprojects {
-  group = 'org.oscim'
-  version = '0.6.0-SNAPSHOT'
+    group = 'org.mapsforge'
+    version = 'master-SNAPSHOT'
 
-  ext.gdxVersion = "1.4.1"
-  ext.androidBuildVersionTools = "22"
+    ext.gdxVersion = "1.9.10"
+    ext.gwtVersion = "2.8.2"
+    ext.slf4jVersion = "1.7.28"
 
-  repositories {
-    maven { url 'https://github.com/hjanetzek/maven-repo/raw/master/' }
-    mavenCentral()
-    // Jeo
-    // maven { url 'http://repo.boundlessgeo.com/main' }
-    mavenLocal()
-    // Local andoird repo
-    maven { url "${System.env.ANDROID_HOME}/extras/android/m2repository" }
-  }
-
-  // create IntelliJ project settings - untested
-  apply plugin: 'idea'
+    if (JavaVersion.current().isJava8Compatible()) {
+        tasks.withType(Javadoc) {
+            options.addStringOption('Xdoclint:none', '-quiet')
+            logging.captureStandardError LogLevel.INFO
+            logging.captureStandardOutput LogLevel.INFO
+        }
+    }
 }
 
-def androidMinSdk() { return 10 }
-def androidTargetSdk() { return 21 }
-def versionCode() { return 50 }
+// 14 for Support Library, 16 for sqlite-android
+
+static def versionCode() { return 1 }
+
 def versionName() { return version }
 
 subprojects {
-  // create eclipse  project settings
-  apply plugin: 'eclipse'
-
-  task copySettings(type: Copy) {
-    from "$rootDir/eclipse"
-    into ".settings"
-    include '**/*'
-  }
-
-  tasks.withType(JavaCompile) {
-    sourceCompatibility = JavaVersion.VERSION_1_7
-    targetCompatibility = JavaVersion.VERSION_1_7
-  }
-
-  eclipseProject.dependsOn copySettings
-
-  // create emacs JDEE project settings
-  // http://ignatyev-dev.blogspot.de/2013/07/gradle-projects-in-jdee.html
-  //apply from:'../jdee.gradle'
+    tasks.withType(JavaCompile) {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+        options.encoding = 'UTF-8'
+        if (JavaVersion.current().isJava9Compatible()) {
+            if (!project.properties.containsKey('android')) {
+                options.compilerArgs.addAll(['--release', '7'])
+            }
+        }
+    }
 }

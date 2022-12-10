@@ -1,5 +1,8 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2018 devemux86
+ * Copyright 2017 Longri
+ * Copyright 2017 Andrey Novikov
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -14,53 +17,38 @@
  * You should have received a copy of the GNU Lesser General Public License along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 package org.oscim.theme;
-
-import java.io.FileNotFoundException;
-import java.io.InputStream;
 
 import org.oscim.backend.CanvasAdapter;
 import org.oscim.theme.IRenderTheme.ThemeException;
-import org.oscim.utils.IOUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.oscim.utils.Parameters;
 
 public class ThemeLoader {
-	static final Logger log = LoggerFactory.getLogger(ThemeLoader.class);
 
-	/**
-	 * Load theme from XML file.
-	 * 
-	 * @throws FileNotFoundException
-	 * @throws ThemeException
-	 */
-	public static IRenderTheme load(String renderThemePath) throws ThemeException,
-	        FileNotFoundException {
-		return load(new ExternalRenderTheme(renderThemePath));
-	}
+    public static IRenderTheme load(String renderThemePath) throws ThemeException {
+        return load(new ExternalRenderTheme(renderThemePath));
+    }
 
-	public static IRenderTheme load(ThemeFile theme) throws ThemeException {
+    public static IRenderTheme load(String renderThemePath, XmlRenderThemeMenuCallback menuCallback) throws ThemeException {
+        return load(new ExternalRenderTheme(renderThemePath, menuCallback));
+    }
 
-		try {
-			InputStream is = theme.getRenderThemeAsStream();
-			return load(is);
-		} catch (FileNotFoundException e) {
-			log.error(e.getMessage());
-		}
+    public static IRenderTheme load(String renderThemePath, ThemeCallback themeCallback) throws ThemeException {
+        return load(new ExternalRenderTheme(renderThemePath), themeCallback);
+    }
 
-		return null;
-	}
+    public static IRenderTheme load(String renderThemePath, XmlRenderThemeMenuCallback menuCallback, ThemeCallback themeCallback) throws ThemeException {
+        return load(new ExternalRenderTheme(renderThemePath, menuCallback), themeCallback);
+    }
 
-	public static IRenderTheme load(InputStream inputStream) throws ThemeException {
+    public static IRenderTheme load(ThemeFile theme) throws ThemeException {
+        return load(theme, null);
+    }
 
-		try {
-			IRenderTheme t = XmlThemeBuilder.read(inputStream);
-			if (t != null)
-				t.scaleTextSize(CanvasAdapter.textScale + (CanvasAdapter.dpi / 240 - 1) * 0.5f);
-			return t;
-		} finally {
-			IOUtils.closeQuietly(inputStream);
-		}
-	}
+    public static IRenderTheme load(ThemeFile theme, ThemeCallback themeCallback) throws ThemeException {
+        IRenderTheme t = Parameters.TEXTURE_ATLAS ? XmlAtlasThemeBuilder.read(theme, themeCallback) : XmlThemeBuilder.read(theme, themeCallback);
+        if (t != null)
+            t.scaleTextSize(CanvasAdapter.getScale() * CanvasAdapter.textScale);
+        return t;
+    }
 }

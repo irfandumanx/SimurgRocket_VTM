@@ -1,6 +1,8 @@
 /*
  * Copyright 2010, 2011, 2012 mapsforge.org
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2017 devemux86
+ * Copyright 2018-2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -18,52 +20,87 @@
 package org.oscim.theme;
 
 import org.oscim.core.GeometryBuffer.GeometryType;
+import org.oscim.core.Tag;
 import org.oscim.core.TagSet;
 import org.oscim.theme.styles.RenderStyle;
 
 public interface IRenderTheme {
 
-	/**
-	 * Matches a MapElement with the given parameters against this RenderTheme.
-	 * 
-	 * @param zoomLevel
-	 *            the zoom level at which the way should be matched.
-	 * @return matching render instructions
-	 */
-	public abstract RenderStyle[] matchElement(GeometryType type, TagSet tags, int zoomLevel);
+    /**
+     * Matches a MapElement with the given parameters against this RenderTheme.
+     *
+     * @param zoomLevel the zoom level at which the way should be matched.
+     * @return matching render instructions
+     */
+    RenderStyle[] matchElement(GeometryType type, TagSet tags, int zoomLevel);
 
-	/**
-	 * Must be called when this RenderTheme gets destroyed to clean up and free
-	 * resources.
-	 */
-	public abstract void dispose();
+    /**
+     * Must be called when this RenderTheme gets destroyed to clean up and free
+     * resources.
+     */
+    void dispose();
 
-	/**
-	 * @return the number of distinct drawing levels required by this
-	 *         RenderTheme.
-	 */
-	public abstract int getLevels();
+    /**
+     * @return the number of distinct drawing levels required by this
+     * RenderTheme.
+     */
+    int getLevels();
 
-	/**
-	 * @return the map background color of this RenderTheme.
-	 */
-	public abstract int getMapBackground();
+    /**
+     * @return the map background color of this RenderTheme.
+     */
+    int getMapBackground();
 
-	public void updateStyles();
+    /**
+     * Is Mapsforge or VTM theme.
+     */
+    boolean isMapsforgeTheme();
 
-	/**
-	 * Scales the text size of this RenderTheme by the given factor.
-	 * 
-	 * @param scaleFactor
-	 *            the factor by which the text size should be scaled.
-	 */
-	public abstract void scaleTextSize(float scaleFactor);
+    void updateStyles();
 
-	public static class ThemeException extends IllegalArgumentException {
-		public ThemeException(String string) {
-			super(string);
-		}
+    /**
+     * Scales the text size of this RenderTheme by the given factor.
+     *
+     * @param scaleFactor the factor by which the text size should be scaled.
+     */
+    void scaleTextSize(float scaleFactor);
 
-		private static final long serialVersionUID = 1L;
-	}
+    /**
+     * Transform internal key to tile source key.
+     * e.g. for lazy fetched tag values via tile source key.
+     * Use when tile source and internal keys have 1-1 relation.
+     *
+     * @return the backwards transformed tag key.
+     */
+    String transformBackwardKey(String key);
+
+    /**
+     * Transform tile source key to internal key.
+     *
+     * @return the forward transformed tag key.
+     */
+    String transformForwardKey(String key);
+
+    /**
+     * Transform internal tag to tile source tag.
+     * Use when tile source and internal tags have 1-1 relation.
+     *
+     * @return the backwards transformed tag.
+     */
+    Tag transformBackwardTag(Tag tag);
+
+    /**
+     * Transform tile source tag to internal tag.
+     *
+     * @return the forward transformed tag.
+     */
+    Tag transformForwardTag(Tag tag);
+
+    class ThemeException extends IllegalArgumentException {
+        public ThemeException(String string) {
+            super(string);
+        }
+
+        private static final long serialVersionUID = 1L;
+    }
 }

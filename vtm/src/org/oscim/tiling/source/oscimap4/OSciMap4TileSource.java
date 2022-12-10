@@ -1,5 +1,6 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2018 devemux86
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -17,44 +18,47 @@
 package org.oscim.tiling.source.oscimap4;
 
 import org.oscim.tiling.ITileDataSource;
+import org.oscim.tiling.OverzoomTileDataSource;
 import org.oscim.tiling.source.UrlTileDataSource;
 import org.oscim.tiling.source.UrlTileSource;
 
 public class OSciMap4TileSource extends UrlTileSource {
 
-	private final static String DEFAULT_URL = "http://opensciencemap.org/tiles/vtm";
-	private final static String DEFAULT_PATH = "/{Z}/{X}/{Y}.vtm";
+    private static final String DEFAULT_URL = "http://opensciencemap.org/tiles/vtm";
+    private static final String DEFAULT_PATH = "/{Z}/{X}/{Y}.vtm";
 
-	public static class Builder<T extends Builder<T>> extends UrlTileSource.Builder<T> {
+    public static class Builder<T extends Builder<T>> extends UrlTileSource.Builder<T> {
 
-		public Builder() {
-			super(DEFAULT_URL, DEFAULT_PATH, 1, 17);
-		}
+        public Builder() {
+            super(DEFAULT_URL, DEFAULT_PATH);
+            overZoom(17);
+        }
 
-		public OSciMap4TileSource build() {
-			return new OSciMap4TileSource(this);
-		}
-	}
+        @Override
+        public OSciMap4TileSource build() {
+            return new OSciMap4TileSource(this);
+        }
+    }
 
-	@SuppressWarnings("rawtypes")
-	public static Builder<?> builder() {
-		return new Builder();
-	}
+    @SuppressWarnings("rawtypes")
+    public static Builder<?> builder() {
+        return new Builder();
+    }
 
-	protected OSciMap4TileSource(Builder<?> builder) {
-		super(builder);
-	}
+    protected OSciMap4TileSource(Builder<?> builder) {
+        super(builder);
+    }
 
-	public OSciMap4TileSource() {
-		this(builder());
-	}
+    public OSciMap4TileSource() {
+        this(builder());
+    }
 
-	public OSciMap4TileSource(String urlString) {
-		this(builder().url(urlString));
-	}
+    public OSciMap4TileSource(String urlString) {
+        this(builder().url(urlString));
+    }
 
-	@Override
-	public ITileDataSource getDataSource() {
-		return new UrlTileDataSource(this, new TileDecoder(), getHttpEngine());
-	}
+    @Override
+    public ITileDataSource getDataSource() {
+        return new OverzoomTileDataSource(new UrlTileDataSource(this, new TileDecoder(), getHttpEngine()), mOverZoom);
+    }
 }

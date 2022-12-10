@@ -1,6 +1,10 @@
 /*
  * Copyright 2010, 2011, 2012 mapsforge.org
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2021 devemux86
+ * Copyright 2017 nebular
+ * Copyright 2017 Andrey Novikov
+ * Copyright 2021 eddiemuc
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -17,28 +21,64 @@
  */
 package org.oscim.theme;
 
-import java.io.InputStream;
-
 import org.oscim.backend.AssetAdapter;
+import org.oscim.theme.IRenderTheme.ThemeException;
+
+import java.io.InputStream;
 
 /**
  * Enumeration of all internal rendering themes.
  */
 public enum VtmThemes implements ThemeFile {
 
-	DEFAULT("styles/default.xml"),
-	TRONRENDER("styles/tronrender.xml"),
-	NEWTRON("styles/newtron.xml"),
-	OSMARENDER("styles/osmarender.xml");
+    DEFAULT("vtm/default.xml"),
+    MAPZEN("vtm/mapzen.xml"),
+    NEWTRON("vtm/newtron.xml"),
+    OPENMAPTILES("vtm/openmaptiles.xml"),
+    OSMAGRAY("vtm/osmagray.xml"),
+    OSMARENDER("vtm/osmarender.xml"),
+    TRONRENDER("vtm/tronrender.xml");
 
-	private final String mPath;
+    private final String mPath;
 
-	private VtmThemes(String path) {
-		mPath = path;
-	}
+    VtmThemes(String path) {
+        mPath = path;
+    }
 
-	@Override
-	public InputStream getRenderThemeAsStream() {
-		return AssetAdapter.readFileAsStream(mPath);
-	}
+    @Override
+    public XmlRenderThemeMenuCallback getMenuCallback() {
+        return null;
+    }
+
+    @Override
+    public String getRelativePathPrefix() {
+        return "";
+    }
+
+    @Override
+    public InputStream getRenderThemeAsStream() throws ThemeException {
+        return AssetAdapter.readFileAsStream(mPath);
+    }
+
+    @Override
+    public XmlThemeResourceProvider getResourceProvider() {
+        return null;
+    }
+
+    @Override
+    public boolean isMapsforgeTheme() {
+        return false;
+    }
+
+    @Override
+    public void setMapsforgeTheme(boolean mapsforgeTheme) {
+    }
+
+    @Override
+    public void setMenuCallback(XmlRenderThemeMenuCallback menuCallback) {
+    }
+
+    @Override
+    public void setResourceProvider(XmlThemeResourceProvider resourceProvider) {
+    }
 }

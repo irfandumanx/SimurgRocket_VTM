@@ -1,5 +1,7 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 Andrey Novikov
+ * Copyright 2016 devemux86
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -19,6 +21,8 @@ package org.oscim.renderer;
 import org.oscim.backend.canvas.Bitmap;
 import org.oscim.renderer.bucket.BitmapBucket;
 
+import static org.oscim.renderer.MapRenderer.COORD_SCALE;
+
 /**
  * RenderLayer to draw a custom Bitmap.
  * NOTE: Only modify the Bitmap within a synchronized block!
@@ -26,64 +30,69 @@ import org.oscim.renderer.bucket.BitmapBucket;
  */
 public class BitmapRenderer extends BucketRenderer {
 
-	private Bitmap mBitmap;
-	private int mWidth;
-	private int mHeight;
-	private boolean initialized;
-	private boolean mUpdateBitmap;
+    private Bitmap mBitmap;
+    private int mWidth;
+    private int mHeight;
+    private boolean mUpdateBitmap;
+    private GLViewport.Position position = GLViewport.Position.TOP_LEFT;
+    private float xOffset, yOffset;
 
-	/**
-	 * @param bitmap
-	 *            with dimension being power of two
-	 * @param srcWidth
-	 *            TODO width used
-	 * @param srcHeight
-	 *            TODO height used
-	 */
-	public synchronized void setBitmap(Bitmap bitmap,
-	        int srcWidth, int srcHeight,
-	        int targetWidth, int targetHeight) {
-		mWidth = targetWidth;
-		mHeight = targetHeight;
-		mBitmap = bitmap;
-		initialized = false;
-	}
+    /**
+     * @param bitmap with dimension being power of two
+     * @param width  width used
+     * @param height height used
+     */
+    public synchronized void setBitmap(Bitmap bitmap, int width, int height) {
+        mBitmap = bitmap;
+        mWidth = width;
+        mHeight = height;
+        mInitialized = false;
+    }
 
-	public synchronized void updateBitmap() {
-		mUpdateBitmap = true;
-	}
+    public synchronized void setPosition(GLViewport.Position position) {
+        this.position = position;
+    }
 
-	@Override
-	public synchronized void update(GLViewport v) {
-		if (!initialized) {
-			buckets.clear();
+    public synchronized void setOffset(float xOffset, float yOffset) {
+        this.xOffset = xOffset;
+        this.yOffset = yOffset;
+    }
 
-			BitmapBucket l = new BitmapBucket(true);
-			l.setBitmap(mBitmap, mWidth, mHeight);
-			buckets.set(l);
+    public synchronized void updateBitmap() {
+        mUpdateBitmap = true;
+    }
 
-			mUpdateBitmap = true;
-		}
+    @Override
+    public synchronized void update(GLViewport v) {
+        if (!mInitialized) {
+            buckets.clear();
 
-		if (mUpdateBitmap) {
-			mUpdateBitmap = false;
-			compile();
-		}
-	}
+            BitmapBucket l = new BitmapBucket(true);
+            l.setBitmap(mBitmap, mWidth, mHeight);
+            buckets.set(l);
 
-	@Override
-	protected synchronized void compile() {
-		if (mBitmap == null)
-			return;
+            mUpdateBitmap = true;
+        }
 
-		synchronized (mBitmap) {
-			super.compile();
-		}
-	}
+        if (mUpdateBitmap) {
+            mUpdateBitmap = false;
+            compile();
+        }
+    }
 
-	@Override
-	public synchronized void render(GLViewport v) {
-		v.useScreenCoordinates(false, 8);
-		BitmapBucket.Renderer.draw(buckets.get(), v, 1, 1);
-	}
+    @Override
+    protected synchronized void compile() {
+        if (mBitmap == null)
+            return;
+
+        synchronized (mBitmap) {
+            super.compile();
+        }
+    }
+
+    @Override
+    public synchronized void render(GLViewport v) {
+        v.useScreenCoordinates(mWidth, mHeight, position, xOffset, yOffset, COORD_SCALE);
+        BitmapBucket.Renderer.draw(buckets.get(), v, 1, 1);
+    }
 }

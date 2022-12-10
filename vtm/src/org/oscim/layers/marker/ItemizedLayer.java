@@ -1,7 +1,11 @@
 /*
  * Copyright 2012 osmdroid authors: Nicolas Gramlich, Theodore Hong, Fred Eisele
- * 
+ *
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2021 devemux86
+ * Copyright 2016 Stephan Leuschner
+ * Copyright 2016 Pedinel
+ * Copyright 2019 Carlos Alberto Martínez Gadea
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -18,238 +22,252 @@
  */
 package org.oscim.layers.marker;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import org.oscim.core.BoundingBox;
+import org.oscim.backend.CanvasAdapter;
+import org.oscim.core.Box;
 import org.oscim.core.Point;
+import org.oscim.core.Tile;
 import org.oscim.event.Gesture;
 import org.oscim.event.GestureListener;
 import org.oscim.event.MotionEvent;
 import org.oscim.map.Map;
 import org.oscim.map.Viewport;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-public class ItemizedLayer<Item extends MarkerItem> extends MarkerLayer<Item>
-        implements GestureListener {
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
 
-	static final Logger log = LoggerFactory.getLogger(ItemizedLayer.class);
+public class ItemizedLayer extends MarkerLayer implements GestureListener {
 
-	protected final List<Item> mItemList;
-	protected final Point mTmpPoint = new Point();
-	protected OnItemGestureListener<Item> mOnItemGestureListener;
-	protected int mDrawnItemsLimit = Integer.MAX_VALUE;
+    protected final List<MarkerInterface> mItemList;
+    protected final Point mTmpPoint = new Point();
+    protected OnItemGestureListener<MarkerInterface> mOnItemGestureListener;
+    protected int mDrawnItemsLimit = Integer.MAX_VALUE;
 
-	public ItemizedLayer(Map map, MarkerSymbol defaulMarker) {
-		this(map, new ArrayList<Item>(), defaulMarker, null);
-	}
+    public ItemizedLayer(Map map, MarkerSymbol defaultMarker) {
+        this(map, new ArrayList<MarkerInterface>(), defaultMarker, null);
+    }
 
-	public ItemizedLayer(Map map, List<Item> list,
-	        MarkerSymbol defaultMarker,
-	        OnItemGestureListener<Item> listener) {
+    public ItemizedLayer(Map map, List<MarkerInterface> list,
+                         MarkerSymbol defaultMarker,
+                         OnItemGestureListener<MarkerInterface> listener) {
 
-		super(map, defaultMarker);
+        super(map, defaultMarker);
 
-		mItemList = list;
-		mOnItemGestureListener = listener;
-		populate();
-	}
+        mItemList = list;
+        mOnItemGestureListener = listener;
+        populate();
+    }
 
-	public void setOnItemGestureListener(OnItemGestureListener<Item> listener) {
-		mOnItemGestureListener = listener;
-	}
+    public ItemizedLayer(Map map, MarkerRendererFactory markerRendererFactory) {
+        this(map, new ArrayList<MarkerInterface>(), markerRendererFactory, null);
+    }
 
-	@Override
-	protected Item createItem(int index) {
-		return mItemList.get(index);
-	}
+    public ItemizedLayer(Map map, List<MarkerInterface> list,
+                         MarkerRendererFactory markerRendererFactory,
+                         OnItemGestureListener<MarkerInterface> listener) {
 
-	@Override
-	public int size() {
-		return Math.min(mItemList.size(), mDrawnItemsLimit);
-	}
+        super(map, markerRendererFactory);
 
-	public boolean addItem(Item item) {
-		final boolean result = mItemList.add(item);
-		populate();
-		return result;
-	}
+        mItemList = list;
+        mOnItemGestureListener = listener;
+        populate();
+    }
 
-	public void addItem(int location, Item item) {
-		mItemList.add(location, item);
-	}
+    public void setOnItemGestureListener(OnItemGestureListener<MarkerInterface> listener) {
+        mOnItemGestureListener = listener;
+    }
 
-	public boolean addItems(List<Item> items) {
-		final boolean result = mItemList.addAll(items);
-		populate();
-		return result;
-	}
+    @Override
+    public synchronized MarkerInterface createItem(int index) {
+        return mItemList.get(index);
+    }
 
-	public void removeAllItems() {
-		removeAllItems(true);
-	}
+    @Override
+    public synchronized int size() {
+        return Math.min(mItemList.size(), mDrawnItemsLimit);
+    }
 
-	public void removeAllItems(boolean withPopulate) {
-		mItemList.clear();
-		if (withPopulate) {
-			populate();
-		}
-	}
+    public synchronized boolean addItem(MarkerInterface item) {
+        final boolean result = mItemList.add(item);
+        populate();
+        return result;
+    }
 
-	public boolean removeItem(Item item) {
-		final boolean result = mItemList.remove(item);
-		populate();
-		return result;
-	}
+    public synchronized void addItem(int location, MarkerInterface item) {
+        mItemList.add(location, item);
+        populate();
+    }
 
-	public Item removeItem(int position) {
-		final Item result = mItemList.remove(position);
-		populate();
-		return result;
-	}
+    public synchronized boolean addItems(Collection<MarkerInterface> items) {
+        final boolean result = mItemList.addAll(items);
+        populate();
+        return result;
+    }
 
-	/**
-	 * Each of these methods performs a item sensitive check. If the item is
-	 * located its corresponding method is called. The result of the call is
-	 * returned. Helper methods are provided so that child classes may more
-	 * easily override behavior without resorting to overriding the
-	 * ItemGestureListener methods.
-	 */
-	//	@Override
-	//	public boolean onTap(MotionEvent event, MapPosition pos) {
-	//		return activateSelectedItems(event, mActiveItemSingleTap);
-	//	}
+    public synchronized List<MarkerInterface> getItemList() {
+        return mItemList;
+    }
 
-	protected boolean onSingleTapUpHelper(int index, Item item) {
-		return mOnItemGestureListener.onItemSingleTapUp(index, item);
-	}
+    public synchronized void removeAllItems() {
+        removeAllItems(true);
+    }
 
-	private final ActiveItem mActiveItemSingleTap = new ActiveItem() {
-		@Override
-		public boolean run(int index) {
-			final ItemizedLayer<Item> that = ItemizedLayer.this;
-			if (mOnItemGestureListener == null) {
-				return false;
-			}
-			return onSingleTapUpHelper(index, that.mItemList.get(index));
-		}
-	};
+    public synchronized void removeAllItems(boolean withPopulate) {
+        mItemList.clear();
+        if (withPopulate) {
+            populate();
+        }
+    }
 
-	protected boolean onLongPressHelper(int index, Item item) {
-		return this.mOnItemGestureListener.onItemLongPress(index, item);
-	}
+    public synchronized boolean removeItem(MarkerInterface item) {
+        final boolean result = mItemList.remove(item);
+        populate();
+        return result;
+    }
 
-	private final ActiveItem mActiveItemLongPress = new ActiveItem() {
-		@Override
-		public boolean run(final int index) {
-			final ItemizedLayer<Item> that = ItemizedLayer.this;
-			if (that.mOnItemGestureListener == null) {
-				return false;
-			}
-			return onLongPressHelper(index, that.mItemList.get(index));
-		}
-	};
+    public synchronized MarkerInterface removeItem(int position) {
+        final MarkerInterface result = mItemList.remove(position);
+        populate();
+        return result;
+    }
 
-	/**
-	 * When a content sensitive action is performed the content item needs to be
-	 * identified. This method does that and then performs the assigned task on
-	 * that item.
-	 * 
-	 * @return true if event is handled false otherwise
-	 */
-	protected boolean activateSelectedItems(MotionEvent event, ActiveItem task) {
-		int size = mItemList.size();
-		if (size == 0)
-			return false;
+    /**
+     * Each of these methods performs a item sensitive check. If the item is
+     * located its corresponding method is called. The result of the call is
+     * returned. Helper methods are provided so that child classes may more
+     * easily override behavior without resorting to overriding the
+     * ItemGestureListener methods.
+     */
+    //    @Override
+    //    public boolean onTap(MotionEvent event, MapPosition pos) {
+    //        return activateSelectedItems(event, mActiveItemSingleTap);
+    //    }
+    protected boolean onSingleTapUpHelper(int index, MarkerInterface item) {
+        return mOnItemGestureListener.onItemSingleTapUp(index, item);
+    }
 
-		int eventX = (int) event.getX() - mMap.getWidth() / 2;
-		int eventY = (int) event.getY() - mMap.getHeight() / 2;
-		Viewport mapPosition = mMap.viewport();
+    private final ActiveItem mActiveItemSingleTap = new ActiveItem() {
+        @Override
+        public boolean run(int index) {
+            if (mOnItemGestureListener == null) {
+                return false;
+            }
+            return onSingleTapUpHelper(index, mItemList.get(index));
+        }
+    };
 
-		BoundingBox bbox = mapPosition.getBBox(128);
+    protected boolean onLongPressHelper(int index, MarkerInterface item) {
+        return this.mOnItemGestureListener.onItemLongPress(index, item);
+    }
 
-		int nearest = -1;
-		int inside = -1;
-		double insideY = -Double.MAX_VALUE;
+    private final ActiveItem mActiveItemLongPress = new ActiveItem() {
+        @Override
+        public boolean run(final int index) {
+            if (mOnItemGestureListener == null) {
+                return false;
+            }
+            return onLongPressHelper(index, mItemList.get(index));
+        }
+    };
 
-		/* squared dist: 50*50 pixel ~ 2mm on 400dpi */
-		double dist = 2500;
+    /**
+     * When a content sensitive action is performed the content item needs to be
+     * identified. This method does that and then performs the assigned task on
+     * that item.
+     *
+     * @return true if event is handled false otherwise
+     */
+    protected boolean activateSelectedItems(MotionEvent event, ActiveItem task) {
+        int size = mItemList.size();
+        if (size == 0)
+            return false;
 
-		for (int i = 0; i < size; i++) {
-			Item item = mItemList.get(i);
+        int eventX = (int) event.getX() - mMap.getWidth() / 2;
+        int eventY = (int) event.getY() - mMap.getHeight() / 2;
+        Viewport mapPosition = mMap.viewport();
 
-			if (!bbox.contains(item.geoPoint))
-				continue;
+        Box box = mapPosition.getBBox(null, Tile.SIZE / 2);
+        box.map2mercator();
+        box.scale(1E6);
 
-			mapPosition.toScreenPoint(item.getPoint(), mTmpPoint);
+        int nearest = -1;
+        int inside = -1;
+        double insideY = -Double.MAX_VALUE;
 
-			float dx = (float) (mTmpPoint.x - eventX);
-			float dy = (float) (mTmpPoint.y - eventY);
+        // squared dist: 50x50 px ~ 2mm on 400dpi
+        // 20x20 px on baseline mdpi (160dpi)
+        double dist = (20 * CanvasAdapter.getScale()) * (20 * CanvasAdapter.getScale());
 
-			MarkerSymbol it = item.getMarker();
-			if (it == null)
-				it = mMarkerRenderer.mDefaultMarker;
+        for (int i = 0; i < size; i++) {
+            MarkerInterface item = mItemList.get(i);
 
-			if (it.isInside(dx, dy)) {
-				if (mTmpPoint.y > insideY) {
-					insideY = mTmpPoint.y;
-					inside = i;
-				}
-			}
-			if (inside >= 0)
-				continue;
+            if (!box.contains(item.getPoint().longitudeE6,
+                    item.getPoint().latitudeE6))
+                continue;
 
-			double d = dx * dx + dy * dy;
-			if (d > dist)
-				continue;
+            mapPosition.toScreenPoint(item.getPoint(), mTmpPoint);
 
-			dist = d;
-			nearest = i;
-		}
+            float dx = (float) (eventX - mTmpPoint.x);
+            float dy = (float) (eventY - mTmpPoint.y);
 
-		if (inside >= 0)
-			nearest = inside;
+            MarkerSymbol it = item.getMarker();
+            if (it == null)
+                it = mMarkerRenderer.mDefaultMarker;
 
-		if (nearest >= 0 && task.run(nearest)) {
-			mMarkerRenderer.update();
-			mMap.render();
-			return true;
-		}
-		return false;
-	}
+            if (it.isInside(dx, dy)) {
+                if (mTmpPoint.y > insideY) {
+                    insideY = mTmpPoint.y;
+                    inside = i;
+                }
+            }
+            if (inside >= 0)
+                continue;
 
-	/**
-	 * When the item is touched one of these methods may be invoked depending on
-	 * the type of touch. Each of them returns true if the event was completely
-	 * handled.
-	 */
-	public static interface OnItemGestureListener<T> {
-		public boolean onItemSingleTapUp(int index, T item);
+            double d = dx * dx + dy * dy;
+            if (d > dist)
+                continue;
 
-		public boolean onItemLongPress(int index, T item);
-	}
+            dist = d;
+            nearest = i;
+        }
 
-	public static interface ActiveItem {
-		public boolean run(int aIndex);
-	}
+        if (inside >= 0)
+            nearest = inside;
 
-	@Override
-	public boolean onGesture(Gesture g, MotionEvent e) {
-		if (g instanceof Gesture.Tap)
-			return activateSelectedItems(e, mActiveItemSingleTap);
+        if (nearest >= 0 && task.run(nearest)) {
+            mMarkerRenderer.update();
+            mMap.render();
+            return true;
+        }
+        return false;
+    }
 
-		if (g instanceof Gesture.LongPress)
-			return activateSelectedItems(e, mActiveItemLongPress);
+    /**
+     * When the item is touched one of these methods may be invoked depending on
+     * the type of touch. Each of them returns true if the event was completely
+     * handled.
+     */
+    public static interface OnItemGestureListener<T> {
+        public boolean onItemSingleTapUp(int index, T item);
 
-		return false;
-	}
+        public boolean onItemLongPress(int index, T item);
+    }
 
-	public Item getByUid(Object uid) {
-		for (Item it : mItemList)
-			if (it.getUid() == uid)
-				return it;
+    public static interface ActiveItem {
+        public boolean run(int aIndex);
+    }
 
-		return null;
-	}
+    @Override
+    public boolean onGesture(Gesture g, MotionEvent e) {
+        if (!isEnabled())
+            return false;
+
+        if (g instanceof Gesture.Tap)
+            return activateSelectedItems(e, mActiveItemSingleTap);
+
+        if (g instanceof Gesture.LongPress)
+            return activateSelectedItems(e, mActiveItemLongPress);
+
+        return false;
+    }
 }

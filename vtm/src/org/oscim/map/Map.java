@@ -1,5 +1,10 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 Andrey Novikov
+ * Copyright 2016 Stephan Leuschner
+ * Copyright 2016-2020 devemux86
+ * Copyright 2016 Longri
+ * Copyright 2018 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,14 +21,14 @@
  */
 package org.oscim.map;
 
+import org.oscim.core.BoundingBox;
+import org.oscim.core.Box;
 import org.oscim.core.MapPosition;
-import org.oscim.event.Event;
-import org.oscim.event.EventDispatcher;
-import org.oscim.event.EventListener;
-import org.oscim.event.Gesture;
-import org.oscim.event.GestureDetector;
-import org.oscim.event.MotionEvent;
+import org.oscim.event.*;
+import org.oscim.layers.AbstractMapEventLayer;
+import org.oscim.layers.Layer;
 import org.oscim.layers.MapEventLayer;
+import org.oscim.layers.MapEventLayer2;
 import org.oscim.layers.tile.TileLayer;
 import org.oscim.layers.tile.vector.OsmTileLayer;
 import org.oscim.layers.tile.vector.VectorTileLayer;
@@ -32,6 +37,8 @@ import org.oscim.theme.IRenderTheme;
 import org.oscim.theme.ThemeFile;
 import org.oscim.theme.ThemeLoader;
 import org.oscim.tiling.TileSource;
+import org.oscim.utils.Parameters;
+import org.oscim.utils.ThreadUtils;
 import org.oscim.utils.async.AsyncExecutor;
 import org.oscim.utils.async.TaskQueue;
 import org.slf4j.Logger;
@@ -39,276 +46,396 @@ import org.slf4j.LoggerFactory;
 
 public abstract class Map implements TaskQueue {
 
-	static final Logger log = LoggerFactory.getLogger(Map.class);
+    private static final Logger log = LoggerFactory.getLogger(Map.class);
 
-	/**
-	 * Listener interface for map update notifications.
-	 * Layers implementing this interface they will be automatically register
-	 * when the layer is added to the map and unregistered when the layer is
-	 * removed. Otherwise use map.events.bind(UpdateListener).
-	 */
-	public interface UpdateListener extends EventListener {
-		void onMapEvent(Event e, MapPosition mapPosition);
-	}
+    /**
+     * Listener interface for map update notifications.
+     * Layers implementing this interface they will be automatically register
+     * when the layer is added to the map and unregistered when the layer is
+     * removed. Otherwise use map.events.bind(UpdateListener).
+     */
+    public interface UpdateListener extends EventListener {
+        void onMapEvent(Event e, MapPosition mapPosition);
+    }
 
-	/**
-	 * Listener interface for input events.
-	 * Layers implementing this interface they will be automatically register
-	 * when the layer is added to the map and unregistered when the layer is
-	 * removed.
-	 */
+    /**
+     * Listener interface for input events.
+     * Layers implementing this interface they will be automatically register
+     * when the layer is added to the map and unregistered when the layer is
+     * removed.
+     */
 
-	public interface InputListener extends EventListener {
-		void onInputEvent(Event e, MotionEvent motionEvent);
-	}
+    public interface InputListener extends EventListener {
+        void onInputEvent(Event e, MotionEvent motionEvent);
+    }
 
-	/**
-	 * UpdateListener event. Map position has changed.
-	 */
-	public static Event POSITION_EVENT = new Event();
+    /**
+     * UpdateListener event. Map position has changed.
+     */
+    public static final Event POSITION_EVENT = new Event();
 
-	/**
-	 * UpdateLister event. Delivered on main-thread when updateMap() was called
-	 * and no CLEAR_EVENT or POSITION_EVENT was triggered.
-	 */
-	public static Event UPDATE_EVENT = new Event();
+    /**
+     * UpdateListener event. Map was moved by user.
+     */
+    public static final Event MOVE_EVENT = new Event();
 
-	/**
-	 * UpdateListerner event. Map state has changed in a way that all layers
-	 * should clear their state e.g. the theme or the TilesSource has changed.
-	 * TODO should have an event-source to only clear affected layers.
-	 */
-	public static Event CLEAR_EVENT = new Event();
+    /**
+     * UpdateListener event. Map was scaled by user.
+     */
+    public static final Event SCALE_EVENT = new Event();
 
-	public final EventDispatcher<InputListener, MotionEvent> input;
-	public final EventDispatcher<UpdateListener, MapPosition> events;
+    /**
+     * UpdateListener event. Map was rotated by user.
+     */
+    public static final Event ROTATE_EVENT = new Event();
 
-	private final Layers mLayers;
-	private final ViewController mViewport;
-	private final Animator mAnimator;
-	private final MapPosition mMapPosition;
-	private final AsyncExecutor mAsyncExecutor;
+    /**
+     * UpdateListener event. Map was tilted by user.
+     */
+    public static final Event TILT_EVENT = new Event();
 
-	protected final MapEventLayer mEventLayer;
-	protected GestureDetector mGestureDetector;
+    /**
+     * UpdateLister event. Delivered on main-thread when updateMap() was called
+     * and no CLEAR_EVENT or POSITION_EVENT was triggered.
+     */
+    public static final Event UPDATE_EVENT = new Event();
 
-	private TileLayer mBaseLayer;
+    /**
+     * UpdateListerner event. Map state has changed in a way that all layers
+     * should clear their state e.g. the theme or the TilesSource has changed.
+     * TODO should have an event-source to only clear affected layers.
+     */
+    public static final Event CLEAR_EVENT = new Event();
 
-	protected boolean mClearMap = true;
+    public static final Event ANIM_END = new Event();
 
-	public Map() {
-		mViewport = new ViewController();
-		mAnimator = new Animator(this);
-		mLayers = new Layers(this);
+    public static final Event ANIM_START = new Event();
 
-		input = new EventDispatcher<InputListener, MotionEvent>() {
+    public final EventDispatcher<InputListener, MotionEvent> input;
+    public final EventDispatcher<UpdateListener, MapPosition> events;
 
-			@Override
-			public void tell(InputListener l, Event e, MotionEvent d) {
-				l.onInputEvent(e, d);
-			}
-		};
-		events = new EventDispatcher<UpdateListener, MapPosition>() {
+    private final Layers mLayers;
+    private final ViewController mViewport;
+    private final AsyncExecutor mAsyncExecutor;
 
-			@Override
-			public void tell(UpdateListener l, Event e, MapPosition d) {
-				l.onMapEvent(e, d);
-			}
-		};
+    protected final Animator mAnimator;
+    protected final MapPosition mMapPosition;
 
-		mAsyncExecutor = new AsyncExecutor(4, this);
-		mMapPosition = new MapPosition();
+    protected final AbstractMapEventLayer mEventLayer;
 
-		mEventLayer = new MapEventLayer(this);
-		mLayers.add(0, mEventLayer);
+    protected boolean mClearMap = true;
 
-	}
+    public Map() {
+        ThreadUtils.init();
 
-	public MapEventLayer getEventLayer() {
-		return mEventLayer;
-	}
+        mViewport = new ViewController();
+        if (Parameters.ANIMATOR2)
+            mAnimator = new Animator2(this);
+        else
+            mAnimator = new Animator(this);
+        mLayers = new Layers(this);
 
-	/**
-	 * Create OsmTileLayer with given TileSource and
-	 * set as base map (layer 1)
-	 * 
-	 * TODO deprecate
-	 */
-	public VectorTileLayer setBaseMap(TileSource tileSource) {
-		VectorTileLayer l = new OsmTileLayer(this);
-		l.setTileSource(tileSource);
-		setBaseMap(l);
-		return l;
-	}
+        input = new EventDispatcher<InputListener, MotionEvent>() {
 
-	public TileLayer setBaseMap(TileLayer tileLayer) {
-		mLayers.add(1, tileLayer);
-		mBaseLayer = tileLayer;
-		return tileLayer;
-	}
+            @Override
+            public void tell(InputListener l, Event e, MotionEvent d) {
+                l.onInputEvent(e, d);
+            }
+        };
+        events = new EventDispatcher<UpdateListener, MapPosition>() {
 
-	/**
-	 * Utility function to set theme of base vector-layer and
-	 * use map background color from theme.
-	 */
-	public void setTheme(ThemeFile theme) {
-		if (mBaseLayer == null) {
-			log.error("No base layer set");
-			throw new IllegalStateException();
-		}
-		setTheme(ThemeLoader.load(theme));
-	}
+            @Override
+            public void tell(UpdateListener l, Event e, MapPosition d) {
+                l.onMapEvent(e, d);
+            }
+        };
 
-	public void setTheme(IRenderTheme theme) {
-		if (theme == null) {
-			throw new IllegalArgumentException("Theme cannot be null.");
-		}
+        mAsyncExecutor = new AsyncExecutor(4, this);
+        mMapPosition = new MapPosition();
 
-		if (mBaseLayer == null) {
-			log.warn("No base layer set.");
-		} else if (mBaseLayer instanceof VectorTileLayer) {
-			((VectorTileLayer) mBaseLayer).setRenderTheme(theme);
-		}
+        if (Parameters.MAP_EVENT_LAYER2)
+            mEventLayer = new MapEventLayer2(this);
+        else
+            mEventLayer = new MapEventLayer(this);
+        mLayers.add(0, mEventLayer);
 
-		MapRenderer.setBackgroundColor(theme.getMapBackground());
+    }
 
-		clearMap();
-	}
+    public AbstractMapEventLayer getEventLayer() {
+        return mEventLayer;
+    }
 
-	public void destroy() {
-		mLayers.destroy();
-		mAsyncExecutor.dispose();
-	}
+    /**
+     * Create OsmTileLayer with given TileSource and
+     * set as base map (layer 1).
+     */
+    public VectorTileLayer setBaseMap(TileSource tileSource) {
+        VectorTileLayer l = new OsmTileLayer(this);
+        l.setTileSource(tileSource);
+        setBaseMap(l);
+        return l;
+    }
 
-	/**
-	 * Request call to onUpdate for all layers. This function can
-	 * be called from any thread. Request will be handled on main
-	 * thread.
-	 * 
-	 * @param redraw pass true to render next frame afterwards
-	 */
-	public abstract void updateMap(boolean redraw);
+    public TileLayer setBaseMap(TileLayer tileLayer) {
+        mLayers.add(1, tileLayer);
+        return tileLayer;
+    }
 
-	/**
-	 * Request to render a frame. Request will be handled on main
-	 * thread. Use this for animations in RenderLayers.
-	 */
-	public abstract void render();
+    /**
+     * Utility function to set theme of base vector-layer and
+     * use map background color from theme.
+     */
+    public IRenderTheme setTheme(ThemeFile theme) {
+        return setTheme(theme, false);
+    }
 
-	/**
-	 * Post a runnable to be executed on main-thread
-	 */
-	@Override
-	public abstract boolean post(Runnable action);
+    /**
+     * Utility function to set theme of base vector-layer, optionally
+     * to all vector layers and use map background color from theme.
+     */
+    public IRenderTheme setTheme(ThemeFile theme, boolean allLayers) {
+        IRenderTheme renderTheme = ThemeLoader.load(theme);
+        setTheme(renderTheme, allLayers);
+        return renderTheme;
+    }
 
-	/**
-	 * Post a runnable to be executed on main-thread. Execution is delayed for
-	 * at least 'delay' milliseconds.
-	 */
-	public abstract boolean postDelayed(Runnable action, long delay);
+    public void setTheme(IRenderTheme theme) {
+        setTheme(theme, false);
+    }
 
-	/**
-	 * Post a task to run on a shared worker-thread. Shoul only use for
-	 * tasks running less than a second.
-	 */
-	@Override
-	public void addTask(Runnable task) {
-		mAsyncExecutor.post(task);
-	}
+    public void setTheme(IRenderTheme theme, boolean allLayers) {
+        if (theme == null) {
+            throw new IllegalArgumentException("Theme cannot be null.");
+        }
 
-	/**
-	 * Return screen width in pixel.
-	 */
-	public abstract int getWidth();
+        boolean themeSet = false;
+        for (Layer layer : mLayers) {
+            if (layer instanceof VectorTileLayer) {
+                ((VectorTileLayer) layer).setTheme(theme);
+                themeSet = true;
+                if (!allLayers)
+                    break;
+            }
+        }
+        if (!themeSet) {
+            log.error("No vector layers set");
+            throw new IllegalStateException();
+        }
 
-	/**
-	 * Return screen height in pixel.
-	 */
-	public abstract int getHeight();
+        MapRenderer.setBackgroundColor(theme.getMapBackground());
 
-	/**
-	 * Request to clear all layers before rendering next frame
-	 */
-	public void clearMap() {
-		mClearMap = true;
-		updateMap(true);
-	}
+        clearMap();
+    }
 
-	/**
-	 * Set {@link MapPosition} of {@link Viewport} and trigger a redraw.
-	 */
-	public void setMapPosition(MapPosition mapPosition) {
-		mViewport.setMapPosition(mapPosition);
-		updateMap(true);
-	}
+    public void destroy() {
+        mLayers.destroy();
+        mAsyncExecutor.dispose();
+    }
 
-	public void setMapPosition(double latitude, double longitude, double scale) {
-		mViewport.setMapPosition(new MapPosition(latitude, longitude, scale));
-		updateMap(true);
-	}
+    /**
+     * Request call to onUpdate for all layers. This function can
+     * be called from any thread. Request will be handled on main
+     * thread.
+     */
+    public abstract void updateMap();
 
-	/**
-	 * Get current {@link MapPosition}.
-	 * 
-	 * @return true when MapPosition was updated (has changed)
-	 */
-	public boolean getMapPosition(MapPosition mapPosition) {
-		return mViewport.getMapPosition(mapPosition);
-	}
+    /**
+     * Request call to onUpdate for all layers. This function can
+     * be called from any thread. Request will be handled on main
+     * thread.
+     *
+     * @param redraw pass true to render next frame afterwards
+     */
+    public abstract void updateMap(boolean redraw);
 
-	/**
-	 * Get current {@link MapPosition}. Consider using
-	 * getViewport.getMapPosition(pos) instead to reuse
-	 * MapPosition instance.
-	 */
-	public MapPosition getMapPosition() {
-		MapPosition pos = new MapPosition();
-		mViewport.getMapPosition(pos);
-		return pos;
-	}
+    /**
+     * Request to render a frame. Request will be handled on main
+     * thread. Use this for animations in RenderLayers.w
+     */
+    public abstract void render();
 
-	/**
-	 * @return Viewport instance
-	 */
-	public ViewController viewport() {
-		return mViewport;
-	}
+    /**
+     * Post a runnable to be executed on main-thread
+     */
+    @Override
+    public abstract boolean post(Runnable action);
 
-	/**
-	 * @return Layers instance
-	 */
-	public Layers layers() {
-		return mLayers;
-	}
+    /**
+     * Post a runnable to be executed on main-thread. Execution is delayed for
+     * at least 'delay' milliseconds.
+     */
+    public abstract boolean postDelayed(Runnable action, long delay);
 
-	/**
-	 * @return MapAnimator instance
-	 */
-	public Animator animator() {
-		return mAnimator;
-	}
+    /**
+     * Post a task to run on a shared worker-thread. Should only use for
+     * tasks running less than a second.
+     */
+    @Override
+    public void addTask(Runnable task) {
+        mAsyncExecutor.post(task);
+    }
 
-	/**
-	 * This function is run on main-loop before rendering a frame.
-	 * Caution: Do not call directly!
-	 */
-	protected void updateLayers() {
-		boolean changed = false;
-		MapPosition pos = mMapPosition;
+    /**
+     * Return view width in pixel.
+     */
+    public abstract int getWidth();
 
-		changed |= mViewport.getMapPosition(pos);
+    /**
+     * Return view height in pixel.
+     */
+    public abstract int getHeight();
 
-		if (mClearMap)
-			events.fire(CLEAR_EVENT, pos);
-		else if (changed)
-			events.fire(POSITION_EVENT, pos);
-		else
-			events.fire(UPDATE_EVENT, pos);
+    /**
+     * Return screen width in pixel.
+     */
+    public abstract int getScreenWidth();
 
-		mClearMap = false;
-	}
+    /**
+     * Return screen height in pixel.
+     */
+    public abstract int getScreenHeight();
 
-	public boolean handleGesture(Gesture g, MotionEvent e) {
-		return mLayers.handleGesture(g, e);
-	}
+    /**
+     * Request to clear all layers before rendering next frame
+     */
+    public void clearMap() {
+        mClearMap = true;
+        updateMap(true);
+    }
+
+    /**
+     * Set {@link MapPosition} of {@link Viewport} and trigger a redraw.
+     */
+    public void setMapPosition(final MapPosition mapPosition) {
+        if (!ThreadUtils.isMainThread())
+            post(new Runnable() {
+                @Override
+                public void run() {
+                    mViewport.setMapPosition(mapPosition);
+                    updateMap(true);
+                }
+            });
+        else {
+            mViewport.setMapPosition(mapPosition);
+            updateMap(true);
+        }
+    }
+
+    public void setMapPosition(double latitude, double longitude, double scale) {
+        mViewport.setMapPosition(new MapPosition(latitude, longitude, scale));
+        updateMap(true);
+    }
+
+    /**
+     * Get current {@link MapPosition} or at possible animation end.
+     *
+     * @param animationEnd map position at animation end (valid with Animator.animateTo methods)
+     * @param mapPosition  reuse MapPosition instance
+     * @return true when MapPosition was updated (has changed)
+     */
+    public boolean getMapPosition(boolean animationEnd, MapPosition mapPosition) {
+        if (animationEnd) {
+            if (animator().isActive()) {
+                mapPosition.copy(animator().getEndPosition());
+                return true;
+            }
+        }
+
+        if (!ThreadUtils.isMainThread()) {
+            return mViewport.getSyncMapPosition(mapPosition);
+        }
+
+        return mViewport.getMapPosition(mapPosition);
+    }
+
+    /**
+     * Get current {@link MapPosition}.
+     *
+     * @return true when MapPosition was updated (has changed)
+     */
+    public boolean getMapPosition(MapPosition mapPosition) {
+        return getMapPosition(false, mapPosition);
+    }
+
+    /**
+     * Get current {@link MapPosition}. Consider using
+     * getViewport.getMapPosition(pos) instead to reuse
+     * MapPosition instance.
+     */
+    public MapPosition getMapPosition() {
+        MapPosition pos = new MapPosition();
+        mViewport.getMapPosition(pos);
+        return pos;
+    }
+
+    public BoundingBox getBoundingBox(int expand) {
+        Box box = new Box();
+        mViewport.getBBox(box, expand);
+        box.map2mercator();
+        return new BoundingBox(box.ymin, box.xmin, box.ymax, box.xmax);
+    }
+
+    /**
+     * @return Viewport instance
+     */
+    public ViewController viewport() {
+        return mViewport;
+    }
+
+    /**
+     * @return Layers instance
+     */
+    public Layers layers() {
+        return mLayers;
+    }
+
+    /**
+     * @return MapAnimator instance
+     */
+    public Animator animator() {
+        return mAnimator;
+    }
+
+    /**
+     * This function is run on main-thread before rendering a frame.
+     * <p>
+     * For internal use only. Do not call!
+     */
+    protected void prepareFrame() {
+        ThreadUtils.assertMainThread();
+
+        MapPosition pos = mMapPosition;
+
+        mAnimator.updateAnimation();
+
+        boolean changed = mViewport.getMapPosition(pos);
+        boolean sizeChanged = mViewport.sizeChanged();
+
+        if (mClearMap)
+            events.fire(CLEAR_EVENT, pos);
+        else if (changed || sizeChanged)
+            events.fire(POSITION_EVENT, pos);
+        else
+            events.fire(UPDATE_EVENT, pos);
+
+        mClearMap = false;
+
+        mAnimator.updateAnimation();
+
+        mViewport.syncViewport();
+    }
+
+    public boolean handleGesture(Gesture g, MotionEvent e) {
+        return mLayers.handleGesture(g, e);
+    }
+
+    /**
+     * Called on render thread, use synchronized!
+     */
+    public abstract void beginFrame();
+
+    /**
+     * Called on render thread, use synchronized!
+     */
+    public abstract void doneFrame(boolean needsRedraw);
 }

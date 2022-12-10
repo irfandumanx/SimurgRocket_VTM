@@ -1,187 +1,335 @@
+/*
+ * Copyright 2018-2019 Gustl22
+ * Copyright 2018-2019 devemux86
+ *
+ * This program is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU Lesser General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+ * PARTICULAR PURPOSE. See the GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License along with
+ * this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 package org.oscim.layers.tile.buildings;
 
 import org.oscim.backend.canvas.Color;
-import org.oscim.layers.tile.TileLayer;
-import org.oscim.layers.tile.TileManager;
-import org.oscim.layers.tile.TileRenderer;
+import org.oscim.core.*;
+import org.oscim.layers.tile.MapTile;
+import org.oscim.layers.tile.vector.VectorTileLayer;
 import org.oscim.map.Map;
-import org.oscim.renderer.GLViewport;
-import org.oscim.renderer.LayerRenderer;
-import org.oscim.renderer.OffscreenRenderer;
-import org.oscim.renderer.OffscreenRenderer.Mode;
-import org.oscim.tiling.TileSource;
-import org.oscim.utils.ColorUtil;
-import org.oscim.utils.ColorsCSS;
+import org.oscim.theme.styles.ExtrusionStyle;
+import org.oscim.utils.ExtrusionUtils;
+import org.oscim.utils.geom.GeometryUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class S3DBLayer extends TileLayer {
-	static final Logger log = LoggerFactory.getLogger(S3DBLayer.class);
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
-	private final static int MAX_CACHE = 32;
-	private final static int SRC_ZOOM = 16;
+import static org.oscim.renderer.MapRenderer.COORD_SCALE;
 
-	/* TODO get from theme */
-	private final static double HSV_S = 0.7;
-	private final static double HSV_V = 1.2;
+/**
+ * A layer to display S3DB elements.
+ */
+public class S3DBLayer extends BuildingLayer {
 
-	private final TileSource mTileSource;
+    private static final Logger log = LoggerFactory.getLogger(S3DBLayer.class);
 
-	public S3DBLayer(Map map, TileSource tileSource) {
-		this(map, tileSource, true, false);
-	}
+    private final float TILE_SCALE = (ExtrusionUtils.REF_TILE_SIZE / (Tile.SIZE * COORD_SCALE));
 
-	public S3DBLayer(Map map, TileSource tileSource, boolean fxaa, boolean ssao) {
-		super(map, new TileManager(map, MAX_CACHE));
-		setRenderer(new S3DBRenderer(fxaa, ssao));
+    private boolean mColored = true;
+    private boolean mTransparent = true;
 
-		mTileManager.setZoomLevel(SRC_ZOOM, SRC_ZOOM);
-		mTileSource = tileSource;
-		initLoader(2);
-	}
+    public S3DBLayer(Map map, VectorTileLayer tileLayer) {
+        this(map, tileLayer, false);
+    }
 
-	@Override
-	protected S3DBTileLoader createLoader() {
-		return new S3DBTileLoader(getManager(), mTileSource);
-	}
+    public S3DBLayer(Map map, VectorTileLayer tileLayer, boolean shadow) {
+        this(map, tileLayer, MIN_ZOOM, map.viewport().getMaxZoomLevel(), shadow);
+    }
 
-	public static class S3DBRenderer extends TileRenderer {
-		LayerRenderer mRenderer;
+    /**
+     * @param map       The map data to add
+     * @param tileLayer The vector tile layer which contains the tiles and map elements
+     * @param zoomMin   The minimum zoom at which the layer appears
+     * @param zoomMax   The maximum zoom at which the layer appears
+     * @param shadow    Declare if using shadow renderer
+     */
+    public S3DBLayer(Map map, VectorTileLayer tileLayer, int zoomMin, int zoomMax, boolean shadow) {
+        super(map, tileLayer, zoomMin, zoomMax, true, shadow);
+    }
 
-		public S3DBRenderer(boolean fxaa, boolean ssao) {
-			mRenderer = new BuildingRenderer(this, SRC_ZOOM, SRC_ZOOM, true, false);
+    public boolean isColored() {
+        return mColored;
+    }
 
-			if (fxaa || ssao) {
-				Mode mode = Mode.FXAA;
-				if (fxaa && ssao)
-					mode = Mode.SSAO_FXAA;
-				else if (ssao)
-					mode = Mode.SSAO;
-				mRenderer = new OffscreenRenderer(mode, mRenderer);
-			}
-		}
+    /**
+     * @param colored true: use colour written in '*:colour' tag,
+     *                false: use colours of extrusion style
+     */
+    public void setColored(boolean colored) {
+        mColored = colored;
+    }
 
-		@Override
-		public synchronized void update(GLViewport v) {
-			super.update(v);
-			mRenderer.update(v);
-			setReady(mRenderer.isReady());
-		}
+    public boolean isTransparent() {
+        return mTransparent;
+    }
 
-		@Override
-		public synchronized void render(GLViewport v) {
-			mRenderer.render(v);
-		}
+    /**
+     * @param transparent if true coloured buildings blend transparency of extrusion style
+     *                    (only in combination with isColored = true)
+     */
+    public void setTransparent(boolean transparent) {
+        mTransparent = transparent;
+    }
 
-		@Override
-		public boolean setup() {
-			mRenderer.setup();
-			return super.setup();
-		}
-	}
+    @Override
+    public void complete(MapTile tile, boolean success) {
+        super.complete(tile, success);
+        // Do stuff here
+    }
 
-	static int getColor(String color, boolean roof) {
+    @Override
+    public void processElement(MapElement element, ExtrusionStyle extrusion, MapTile tile) {
+        float groundScale = tile.getGroundScale();
 
-		if (color.charAt(0) == '#') {
-			int c = Color.parseColor(color, Color.CYAN);
-			/* hardcoded colors are way too saturated for my taste */
-			return ColorUtil.modHsv(c, 1.0, 0.4, HSV_V, true);
-		}
+        int maxHeight = 0; // cm
+        int minHeight = 0; // cm
+        int roofHeight = 0;
 
-		if (roof) {
-			if ("brown" == color)
-				return Color.get(120, 110, 110);
-			if ("red" == color)
-				return Color.get(235, 140, 130);
-			if ("green" == color)
-				return Color.get(150, 200, 130);
-			if ("blue" == color)
-				return Color.get(100, 50, 200);
-		}
-		if ("white" == color)
-			return Color.get(240, 240, 240);
-		if ("black" == color)
-			return Color.get(86, 86, 86);
-		if ("grey" == color || "gray" == color)
-			return Color.get(120, 120, 120);
-		if ("red" == color)
-			return Color.get(255, 190, 190);
-		if ("green" == color)
-			return Color.get(190, 255, 190);
-		if ("blue" == color)
-			return Color.get(190, 190, 255);
-		if ("yellow" == color)
-			return Color.get(255, 255, 175);
-		if ("darkgray" == color || "darkgrey" == color)
-			return Color.DKGRAY;
-		if ("lightgray" == color || "lightgrey" == color)
-			return Color.LTGRAY;
+        // Get roof height
+        String v = getValue(element, Tag.KEY_ROOF_HEIGHT);
+        if (v != null) {
+            roofHeight = (int) (Float.parseFloat(v) * 100);
+        } else if ((v = getValue(element, Tag.KEY_ROOF_LEVELS)) != null) {
+            roofHeight = (int) (Float.parseFloat(v) * BUILDING_LEVEL_HEIGHT);
+        } else if ((v = getValue(element, Tag.KEY_ROOF_ANGLE)) != null) {
+            Box bb = null;
+            for (int k = 0; k < element.index[0]; k += 2) {
+                float p1 = element.points[k];
+                float p2 = element.points[k + 1];
+                if (bb == null)
+                    bb = new Box(p1, p2);
+                else {
+                    bb.add(p1, p2);
+                }
+            }
+            if (bb != null) {
+                float minSize = (int) Math.min(bb.getHeight(), bb.getWidth()) * groundScale; // depends on lat
+                // Angle is simplified, 40 is an estimated constant
+                roofHeight = (int) ((Float.parseFloat(v) / 45.f) * (minSize * 40));
+            }
+        } else if ((v = getValue(element, Tag.KEY_ROOF_SHAPE)) != null && !v.equals(Tag.VALUE_FLAT)) {
+            roofHeight = (2 * BUILDING_LEVEL_HEIGHT);
+        }
 
-		if ("transparent" == color)
-			return Color.get(0, 1, 1, 1);
+        // Get building height
+        v = getValue(element, Tag.KEY_HEIGHT);
+        if (v != null) {
+            maxHeight = (int) (Float.parseFloat(v) * 100);
+        } else {
+            // #TagFromTheme: generalize level/height tags
+            if ((v = getValue(element, Tag.KEY_BUILDING_LEVELS)) != null) {
+                maxHeight = (int) (Float.parseFloat(v) * BUILDING_LEVEL_HEIGHT);
+                maxHeight += roofHeight;
+            }
+        }
+        if (maxHeight == 0)
+            maxHeight = extrusion.defaultHeight * 100;
 
-		Integer css = ColorsCSS.get(color);
+        v = getValue(element, Tag.KEY_MIN_HEIGHT);
+        if (v != null)
+            minHeight = (int) (Float.parseFloat(v) * 100);
+        else {
+            // #TagFromTheme: level/height tags
+            if ((v = getValue(element, Tag.KEY_BUILDING_MIN_LEVEL)) != null)
+                minHeight = (int) (Float.parseFloat(v) * BUILDING_LEVEL_HEIGHT);
+        }
 
-		if (css != null)
-			return ColorUtil.modHsv(css.intValue(), 1.0, HSV_S, HSV_V, true);
+        // Get building color
+        Integer bColor = null;
+        if (mColored) {
+            if ((v = getTransformedValue(element, Tag.KEY_BUILDING_COLOR)) != null) {
+                bColor = S3DBUtils.getColor(v, extrusion.hsv, false);
+            } else if ((v = getTransformedValue(element, Tag.KEY_BUILDING_MATERIAL)) != null) {
+                bColor = S3DBUtils.getMaterialColor(v, extrusion.hsv, false);
+            }
+        }
 
-		log.debug("unknown color:{}", color);
-		return 0;
-	}
+        if (bColor == null) {
+            bColor = extrusion.colorSide;
+        } else if (mTransparent) {
+            // Multiply alpha channel of extrusion style
+            bColor = ExtrusionStyle.blendAlpha(bColor, Color.aToFloat(extrusion.colorSide));
+        }
 
-	static int getMaterialColor(String material, boolean roof) {
+        // Scale x, y and z axis
+        ExtrusionUtils.mapPolyCoordScale(element);
+        float minHeightS = ExtrusionUtils.mapGroundScale(minHeight, groundScale) * TILE_SCALE;
+        float maxHeightS = ExtrusionUtils.mapGroundScale(maxHeight, groundScale) * TILE_SCALE;
+        float minRoofHeightS = ExtrusionUtils.mapGroundScale(maxHeight - roofHeight, groundScale) * TILE_SCALE;
 
-		if (roof) {
-			if ("glass" == material)
-				return Color.fade(Color.get(130, 224, 255), 0.9f);
-		}
-		if ("roof_tiles" == material)
-			return Color.get(216, 167, 111);
-		if ("tile" == material)
-			return Color.get(216, 167, 111);
+        // Process building and roof
+        processRoof(element, tile, minRoofHeightS, maxHeightS, bColor, extrusion);
+        if (S3DBUtils.calcOutlines(element, minHeightS, minRoofHeightS)) {
+            get(tile).addMeshElement(element, groundScale, bColor);
+        }
+    }
 
-		if ("concrete" == material ||
-		        "cement_block" == material)
-			return Color.get(210, 212, 212);
+    @Override
+    protected void processElements(MapTile tile) {
+        if (!mBuildings.containsKey(tile.hashCode()))
+            return;
 
-		if ("metal" == material)
-			return 0xFFC0C0C0;
-		if ("tar_paper" == material)
-			return 0xFF969998;
-		if ("eternit" == material)
-			return Color.get(216, 167, 111);
-		if ("tin" == material)
-			return 0xFFC0C0C0;
-		if ("asbestos" == material)
-			return Color.get(160, 152, 141);
-		if ("glass" == material)
-			return Color.get(130, 224, 255);
-		if ("slate" == material)
-			return 0xFF605960;
-		if ("zink" == material)
-			return Color.get(180, 180, 180);
-		if ("gravel" == material)
-			return Color.get(170, 130, 80);
-		if ("copper" == material)
-			// same as roof color:green
-			return Color.get(150, 200, 130);
-		if ("wood" == material)
-			return Color.get(170, 130, 80);
-		if ("grass" == material)
-			return 0xFF50AA50;
-		if ("stone" == material)
-			return Color.get(206, 207, 181);
-		if ("plaster" == material)
-			return Color.get(236, 237, 181);
-		if ("brick" == material)
-			return Color.get(255, 217, 191);
-		if ("stainless_steel" == material)
-			return Color.get(153, 157, 160);
-		if ("gold" == material)
-			return 0xFFFFD700;
+        List<BuildingElement> tileBuildings = mBuildings.get(tile.hashCode());
+        Set<BuildingElement> rootBuildings = new HashSet<>();
+        for (BuildingElement partBuilding : tileBuildings) {
+            if (!partBuilding.element.isBuildingPart())
+                continue;
 
-		log.debug("unknown material:{}", material);
+            String refId = getValue(partBuilding.element, Tag.KEY_REF);
+            if (!RAW_DATA && refId == null)
+                continue;
 
-		return 0;
-	}
+            TagSet partTags = partBuilding.element.tags;
+
+            // Search buildings which inherit parts
+            for (BuildingElement rootBuilding : tileBuildings) {
+                if (rootBuilding.element.isBuildingPart())
+                    continue;
+                if (RAW_DATA) {
+                    float[] center = GeometryUtils.center(partBuilding.element.points, 0, partBuilding.element.pointNextPos, null);
+                    if (!GeometryUtils.pointInPoly(center[0], center[1], rootBuilding.element.points, rootBuilding.element.index[0], 0))
+                        continue;
+                } else if (!refId.equals(rootBuilding.element.tags.getValue(Tag.KEY_ID)))
+                    continue;
+
+                if ((getValue(rootBuilding.element, Tag.KEY_ROOF_SHAPE) != null)
+                        && (getValue(partBuilding.element, Tag.KEY_ROOF_SHAPE) == null)) {
+                    partBuilding.element.tags.add(rootBuilding.element.tags.get(getKeyOrDefault(Tag.KEY_ROOF_SHAPE)));
+                }
+
+                if (mColored) {
+                    TagSet rootTags = rootBuilding.element.tags;
+
+                    for (int i = 0; i < rootTags.size(); i++) {
+                        Tag rTag = rootTags.get(i);
+                        if ((rTag.key.equals(getKeyOrDefault(Tag.KEY_BUILDING_COLOR))
+                                && !partTags.containsKey(getKeyOrDefault(Tag.KEY_BUILDING_MATERIAL))
+                                || rTag.key.equals(getKeyOrDefault(Tag.KEY_ROOF_COLOR))
+                                && !partTags.containsKey(getKeyOrDefault(Tag.KEY_ROOF_MATERIAL)))
+                                && !partTags.containsKey(rTag.key)) {
+                            partTags.add(rTag);
+                        }
+                    }
+                }
+                rootBuildings.add(rootBuilding);
+                break;
+            }
+        }
+
+        tileBuildings.removeAll(rootBuildings); // root buildings aren't rendered
+
+        for (BuildingElement buildingElement : tileBuildings) {
+            processElement(buildingElement.element, buildingElement.style, tile);
+        }
+        mBuildings.remove(tile.hashCode());
+    }
+
+    /**
+     * Process the roof parts of building.
+     *
+     * @param element       the MapElement which needs a roof
+     * @param tile          the tile which contains map element
+     * @param minHeight     the height of the underlying building
+     * @param maxHeight     the height of the roof + minHeight (whole building)
+     * @param buildingColor the color of main building
+     * @param extrusion     the extrusion style
+     */
+    private void processRoof(MapElement element, MapTile tile, float minHeight, float maxHeight,
+                             int buildingColor, ExtrusionStyle extrusion) {
+        int roofColor = extrusion.colorTop;
+        String v;
+
+        if (mColored) {
+            v = getTransformedValue(element, Tag.KEY_ROOF_COLOR);
+            if (v != null)
+                roofColor = S3DBUtils.getColor(v, extrusion.hsv, false);
+            else if ((v = getTransformedValue(element, Tag.KEY_ROOF_MATERIAL)) != null)
+                roofColor = S3DBUtils.getMaterialColor(v, extrusion.hsv, false);
+        }
+
+        boolean roofOrientationAcross = false;
+        if ((v = getValue(element, Tag.KEY_ROOF_ORIENTATION)) != null) {
+            if (v.equals(Tag.VALUE_ACROSS)) {
+                roofOrientationAcross = true;
+            }
+        }
+
+        // Calc roof shape
+        v = getValue(element, Tag.KEY_ROOF_SHAPE);
+        if (v == null) {
+            v = Tag.VALUE_FLAT;
+        }
+
+        float groundScale = tile.getGroundScale();
+
+        GeometryBuffer gElement = new GeometryBuffer(element);
+        GeometryBuffer specialParts = null;
+
+        if (mTransparent) {
+            // Use transparency of default roof color
+            roofColor = ExtrusionStyle.blendAlpha(roofColor, Color.aToFloat(extrusion.colorTop));
+        }
+
+        boolean success;
+        switch (v) {
+            case Tag.VALUE_DOME:
+            case Tag.VALUE_ONION:
+                success = S3DBUtils.calcCircleMesh(gElement, minHeight, maxHeight, v);
+                break;
+            case Tag.VALUE_ROUND:
+            case Tag.VALUE_SALTBOX:
+            case Tag.VALUE_GABLED:
+            case Tag.VALUE_GAMBREL:
+                specialParts = new GeometryBuffer(0, 0); // No data in GeometryBuffer needed
+                success = S3DBUtils.calcRidgeMesh(gElement, minHeight, maxHeight, roofOrientationAcross, v, specialParts);
+                break;
+            case Tag.VALUE_MANSARD:
+            case Tag.VALUE_HALF_HIPPED:
+            case Tag.VALUE_HIPPED:
+                success = S3DBUtils.calcRidgeMesh(gElement, minHeight, maxHeight, roofOrientationAcross, v, null);
+                break;
+            case Tag.VALUE_SKILLION:
+                // ROOF_SLOPE_DIRECTION is not supported yet
+                String roofDirection = element.tags.getValue(Tag.KEY_ROOF_DIRECTION);
+                float roofDegree = 0;
+                if (roofDirection != null) {
+                    roofDegree = Float.parseFloat(roofDirection);
+                }
+                specialParts = new GeometryBuffer(element);
+                success = S3DBUtils.calcSkillionMesh(gElement, minHeight, maxHeight, roofDegree, specialParts);
+                break;
+            case Tag.VALUE_PYRAMIDAL:
+                success = S3DBUtils.calcPyramidalMesh(gElement, minHeight, maxHeight);
+                break;
+            case Tag.VALUE_FLAT:
+            default:
+                success = S3DBUtils.calcFlatMesh(gElement, minHeight);
+                break;
+        }
+
+        if (success) {
+            get(tile).addMeshElement(gElement, groundScale, roofColor);
+            if (specialParts != null) {
+                get(tile).addMeshElement(specialParts, groundScale, buildingColor);
+            }
+        } else {
+            log.debug("Roof calculation failed: " + element.toString());
+        }
+    }
 }

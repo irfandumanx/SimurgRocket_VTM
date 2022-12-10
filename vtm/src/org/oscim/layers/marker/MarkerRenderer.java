@@ -1,5 +1,9 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016 Izumi Kawashima
+ * Copyright 2017 Longri
+ * Copyright 2017-2020 devemux86
+ * Copyright 2017 nebular
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -14,10 +18,7 @@
  * You should have received a copy of the GNU Lesser General Public License along with
  * this program. If not, see <http://www.gnu.org/licenses/>.
  */
-
 package org.oscim.layers.marker;
-
-import java.util.Comparator;
 
 import org.oscim.core.MercatorProjection;
 import org.oscim.core.Point;
@@ -26,222 +27,215 @@ import org.oscim.renderer.BucketRenderer;
 import org.oscim.renderer.GLViewport;
 import org.oscim.renderer.bucket.SymbolBucket;
 import org.oscim.renderer.bucket.SymbolItem;
+import org.oscim.utils.Parameters;
 import org.oscim.utils.TimSort;
 import org.oscim.utils.geom.GeometryUtils;
 
+import java.util.Comparator;
+
 public class MarkerRenderer extends BucketRenderer {
 
-	protected final MarkerSymbol mDefaultMarker;
+    protected final MarkerSymbol mDefaultMarker;
 
-	private final SymbolBucket mSymbolLayer;
-	private final float[] mBox = new float[8];
-	private final MarkerLayer<MarkerItem> mMarkerLayer;
-	private final Point mMapPoint = new Point();
+    protected final SymbolBucket mSymbolLayer;
+    protected final float[] mBox = new float[8];
+    protected final MarkerLayer mMarkerLayer;
+    protected final Point mMapPoint = new Point();
 
-	/** increase view to show items that are partially visible */
-	protected int mExtents = 100;
+    /**
+     * flag to force update of markers
+     */
+    protected boolean mUpdate;
 
-	/** flag to force update of markers */
-	private boolean mUpdate;
+    protected InternalItem[] mItems;
 
-	private InternalItem[] mItems;
+    public MarkerRenderer(MarkerLayer markerLayer, MarkerSymbol defaultSymbol) {
+        mSymbolLayer = new SymbolBucket();
+        mMarkerLayer = markerLayer;
+        mDefaultMarker = defaultSymbol;
+    }
 
-	static class InternalItem {
-		MarkerItem item;
-		boolean visible;
-		boolean changes;
-		float x, y;
-		double px, py;
-		float dy;
+    @Override
+    public synchronized void update(GLViewport v) {
+        if (!v.changed() && !mUpdate)
+            return;
 
-		@Override
-		public String toString() {
-			return "\n" + x + ":" + y + " / " + dy + " " + visible;
-		}
-	}
+        mUpdate = false;
 
-	public MarkerRenderer(MarkerLayer<MarkerItem> markerLayer, MarkerSymbol defaultSymbol) {
-		mSymbolLayer = new SymbolBucket();
-		mMarkerLayer = markerLayer;
-		mDefaultMarker = defaultSymbol;
-	}
+        double mx = v.pos.x;
+        double my = v.pos.y;
+        double scale = Tile.SIZE * v.pos.scale;
 
-	@Override
-	public synchronized void update(GLViewport v) {
-		if (!v.changed() && !mUpdate)
-			return;
+        //int changesInvisible = 0;
+        //int changedVisible = 0;
+        int numVisible = 0;
 
-		mUpdate = false;
+        // Increase view to show items that are partially visible
+        mMarkerLayer.map().viewport().getMapExtents(mBox, Tile.SIZE / 2);
 
-		double mx = v.pos.x;
-		double my = v.pos.y;
-		double scale = Tile.SIZE * v.pos.scale;
+        long flip = (long) (Tile.SIZE * v.pos.scale) >> 1;
 
-		//int changesInvisible = 0;
-		//int changedVisible = 0;
-		int numVisible = 0;
+        if (mItems == null) {
+            if (buckets.get() != null) {
+                buckets.clear();
+                compile();
+            }
+            return;
+        }
 
-		mMarkerLayer.map().viewport().getMapExtents(mBox, mExtents);
+        double angle = Math.toRadians(v.pos.bearing);
+        float cos = (float) Math.cos(angle);
+        float sin = (float) Math.sin(angle);
 
-		long flip = (long) (Tile.SIZE * v.pos.scale) >> 1;
+        /* check visibility */
+        for (InternalItem it : mItems) {
+            it.changes = false;
+            it.x = (float) ((it.px - mx) * scale);
+            it.y = (float) ((it.py - my) * scale);
 
-		if (mItems == null) {
-			if (buckets.get() != null) {
-				buckets.clear();
-				compile();
-			}
-			return;
-		}
+            if (it.x > flip)
+                it.x -= (flip << 1);
+            else if (it.x < -flip)
+                it.x += (flip << 1);
 
-		double angle = Math.toRadians(v.pos.bearing);
-		float cos = (float) Math.cos(angle);
-		float sin = (float) Math.sin(angle);
+            if (!GeometryUtils.pointInPoly(it.x, it.y, mBox, 8, 0)) {
+                if (it.visible) {
+                    it.changes = true;
+                    //changesInvisible++;
+                }
+                continue;
+            }
 
-		/* check visibility */
-		for (InternalItem it : mItems) {
-			it.changes = false;
-			it.x = (float) ((it.px - mx) * scale);
-			it.y = (float) ((it.py - my) * scale);
+            it.dy = sin * it.x + cos * it.y;
 
-			if (it.x > flip)
-				it.x -= (flip << 1);
-			else if (it.x < -flip)
-				it.x += (flip << 1);
+            if (!it.visible) {
+                it.visible = true;
+                //changedVisible++;
+            }
+            numVisible++;
+        }
 
-			if (!GeometryUtils.pointInPoly(it.x, it.y, mBox, 8, 0)) {
-				if (it.visible) {
-					it.changes = true;
-					//changesInvisible++;
-				}
-				continue;
-			}
+        //log.debug(numVisible + " " + changedVisible + " " + changesInvisible);
 
-			it.dy = sin * it.x + cos * it.y;
+        /* only update when zoomlevel changed, new items are visible
+         * or more than 10 of the current items became invisible */
+        //if ((numVisible == 0) && (changedVisible == 0 && changesInvisible < 10))
+        //    return;
+        buckets.clear();
 
-			if (!it.visible) {
-				it.visible = true;
-				//changedVisible++;
-			}
-			numVisible++;
-		}
+        if (numVisible == 0) {
+            compile();
+            return;
+        }
+        /* keep position for current state */
+        mMapPosition.copy(v.pos);
+        mMapPosition.bearing = -mMapPosition.bearing;
 
-		//log.debug(numVisible + " " + changedVisible + " " + changesInvisible);
+        sort(mItems, 0, mItems.length);
+        //log.debug(Arrays.toString(mItems));
+        for (InternalItem it : mItems) {
+            if (!it.visible)
+                continue;
 
-		/* only update when zoomlevel changed, new items are visible
-		 * or more than 10 of the current items became invisible */
-		//if ((numVisible == 0) && (changedVisible == 0 && changesInvisible < 10))
-		//	return;
-		buckets.clear();
+            if (it.changes) {
+                it.visible = false;
+                continue;
+            }
 
-		if (numVisible == 0) {
-			compile();
-			return;
-		}
-		/* keep position for current state */
-		mMapPosition.copy(v.pos);
-		mMapPosition.bearing = -mMapPosition.bearing;
+            MarkerSymbol marker = it.item.getMarker();
+            if (marker == null)
+                marker = mDefaultMarker;
 
-		sort(mItems, 0, mItems.length);
-		//log.debug(Arrays.toString(mItems));
-		for (InternalItem it : mItems) {
-			if (!it.visible)
-				continue;
+            SymbolItem s = SymbolItem.pool.get();
+            if (marker.isBitmap()) {
+                s.set(it.x, it.y, marker.getBitmap(), marker.rotation, marker.isBillboard());
+            } else {
+                s.set(it.x, it.y, marker.getTextureRegion(), marker.rotation, marker.isBillboard());
+            }
+            s.offset = marker.getHotspot();
+            mSymbolLayer.pushSymbol(s);
+        }
 
-			if (it.changes) {
-				it.visible = false;
-				continue;
-			}
+        buckets.set(mSymbolLayer);
+        buckets.prepare();
 
-			MarkerSymbol marker = it.item.getMarker();
-			if (marker == null)
-				marker = mDefaultMarker;
+        compile();
+    }
 
-			SymbolItem s = SymbolItem.pool.get();
-			s.set(it.x, it.y, marker.getBitmap(), true);
-			s.offset = marker.getHotspot();
-			s.billboard = marker.isBillboard();
-			mSymbolLayer.pushSymbol(s);
-		}
+    protected void populate(int size) {
 
-		buckets.set(mSymbolLayer);
-		buckets.prepare();
+        InternalItem[] tmp = new InternalItem[size];
 
-		compile();
-	}
+        for (int i = 0; i < size; i++) {
+            InternalItem it = new InternalItem();
+            tmp[i] = it;
+            it.item = mMarkerLayer.createItem(i);
 
-	protected void populate(int size) {
+            /* pre-project points */
+            MercatorProjection.project(it.item.getPoint(), mMapPoint);
+            it.px = mMapPoint.x;
+            it.py = mMapPoint.y;
+        }
+        synchronized (this) {
+            mUpdate = true;
+            mItems = tmp;
+        }
+    }
 
-		InternalItem[] tmp = new InternalItem[size];
+    public void update() {
+        mUpdate = true;
+    }
 
-		for (int i = 0; i < size; i++) {
-			InternalItem it = new InternalItem();
-			tmp[i] = it;
-			it.item = mMarkerLayer.createItem(i);
+    static TimSort<InternalItem> ZSORT = new TimSort<InternalItem>();
 
-			/* pre-project points */
-			MercatorProjection.project(it.item.getPoint(), mMapPoint);
-			it.px = mMapPoint.x;
-			it.py = mMapPoint.y;
-		}
-		synchronized (this) {
-			mUpdate = true;
-			mItems = tmp;
-		}
-	}
+    protected void sort(InternalItem[] a, int lo, int hi) {
+        int nRemaining = hi - lo;
+        if (nRemaining < 2) {
+            return;
+        }
 
-	public void update() {
-		mUpdate = true;
-	}
+        if (Parameters.MARKER_SORT)
+            ZSORT.doSort(a, zComparator, lo, hi);
+    }
 
-	static TimSort<InternalItem> ZSORT = new TimSort<InternalItem>();
+    static final Comparator<InternalItem> zComparator = new Comparator<InternalItem>() {
+        @Override
+        public int compare(InternalItem a, InternalItem b) {
+            if (a.visible && b.visible) {
+                if (a.dy > b.dy) {
+                    return -1;
+                }
+                if (a.dy < b.dy) {
+                    return 1;
+                }
+            } else if (a.visible) {
+                return -1;
+            } else if (b.visible) {
+                return 1;
+            }
 
-	public static void sort(InternalItem[] a, int lo, int hi) {
-		int nRemaining = hi - lo;
-		if (nRemaining < 2) {
-			return;
-		}
+            return 0;
+        }
+    };
 
-		ZSORT.doSort(a, zComparator, lo, hi);
-	}
-
-	final static Comparator<InternalItem> zComparator = new Comparator<InternalItem>() {
-		@Override
-		public int compare(InternalItem a, InternalItem b) {
-			if (a.visible && b.visible) {
-				if (a.dy > b.dy) {
-					return -1;
-				}
-				if (a.dy < b.dy) {
-					return 1;
-				}
-			} else if (a.visible) {
-				return -1;
-			} else if (b.visible) {
-				return 1;
-			}
-
-			return 0;
-		}
-	};
-
-	//	/**
-	//	 * Returns the Item at the given index.
-	//	 * 
-	//	 * @param position
-	//	 *            the position of the item to return
-	//	 * @return the Item of the given index.
-	//	 */
-	//	public final Item getItem(int position) {
-	//
-	//		synchronized (lock) {
-	//			InternalItem item = mItems;
-	//			for (int i = mSize - position - 1; i > 0 && item != null; i--)
-	//				item = item.next;
-	//
-	//			if (item != null)
-	//				return item.item;
-	//
-	//			return null;
-	//		}
-	//	}
+    //    /**
+    //     * Returns the Item at the given index.
+    //     *
+    //     * @param position
+    //     *            the position of the item to return
+    //     * @return the Item of the given index.
+    //     */
+    //    public final Item getItem(int position) {
+    //
+    //        synchronized (lock) {
+    //            InternalItem item = mItems;
+    //            for (int i = mSize - position - 1; i > 0 && item != null; i--)
+    //                item = item.next;
+    //
+    //            if (item != null)
+    //                return item.item;
+    //
+    //            return null;
+    //        }
+    //    }
 }

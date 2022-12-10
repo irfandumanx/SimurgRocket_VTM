@@ -1,5 +1,7 @@
 /*
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2019 devemux86
+ * Copyright 2018-2019 Gustl22
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -16,6 +18,15 @@
  */
 package org.oscim.gdx;
 
+import com.badlogic.gdx.Application;
+import com.badlogic.gdx.ApplicationListener;
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.InputMultiplexer;
+import com.badlogic.gdx.graphics.glutils.GLVersion;
+import com.badlogic.gdx.input.GestureDetector;
+import com.badlogic.gdx.utils.Timer;
+import com.badlogic.gdx.utils.Timer.Task;
+
 import org.oscim.layers.TileGridLayer;
 import org.oscim.layers.tile.buildings.BuildingLayer;
 import org.oscim.layers.tile.vector.VectorTileLayer;
@@ -25,189 +36,213 @@ import org.oscim.map.Map;
 import org.oscim.renderer.MapRenderer;
 import org.oscim.theme.VtmThemes;
 import org.oscim.tiling.TileSource;
+import org.oscim.utils.Parameters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.badlogic.gdx.Application;
-import com.badlogic.gdx.ApplicationListener;
-import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.InputMultiplexer;
-import com.badlogic.gdx.utils.Timer;
-import com.badlogic.gdx.utils.Timer.Task;
-
 public abstract class GdxMap implements ApplicationListener {
-	final static Logger log = LoggerFactory.getLogger(GdxMap.class);
 
-	protected final Map mMap;
-	private final MapAdapter mMapAdapter;
+    private static final Logger log = LoggerFactory.getLogger(GdxMap.class);
 
-	VectorTileLayer mMapLayer;
-	private final MapRenderer mMapRenderer;
+    protected Map mMap;
+    protected GestureDetector mGestureDetector;
 
-	public GdxMap() {
-		mMap = mMapAdapter = new MapAdapter();
-		mMapRenderer = new MapRenderer(mMap);
-	}
+    protected MapRenderer mMapRenderer;
 
-	protected void initDefaultLayers(TileSource tileSource, boolean tileGrid, boolean labels,
-	        boolean buildings) {
-		Layers layers = mMap.layers();
+    public GdxMap() {
+    }
 
-		if (tileSource != null) {
-			mMapLayer = mMap.setBaseMap(tileSource);
-			mMap.setTheme(VtmThemes.DEFAULT);
+    protected void initDefaultLayers(TileSource tileSource, boolean tileGrid, boolean labels,
+                                     boolean buildings) {
+        Layers layers = mMap.layers();
 
-			if (buildings)
-				layers.add(new BuildingLayer(mMap, mMapLayer));
+        if (tileSource != null) {
+            VectorTileLayer mapLayer = mMap.setBaseMap(tileSource);
+            mMap.setTheme(VtmThemes.DEFAULT);
 
-			if (labels)
-				layers.add(new LabelLayer(mMap, mMapLayer));
-		}
+            if (buildings)
+                layers.add(new BuildingLayer(mMap, mapLayer));
 
-		if (tileGrid)
-			layers.add(new TileGridLayer(mMap));
-	}
+            if (labels)
+                layers.add(new LabelLayer(mMap, mapLayer));
+        }
 
-	@Override
-	public void create() {
+        if (tileGrid)
+            layers.add(new TileGridLayer(mMap));
+    }
 
-		Gdx.graphics.setContinuousRendering(false);
-		Gdx.app.setLogLevel(Application.LOG_DEBUG);
+    @Override
+    public void create() {
+        final GLVersion version = Gdx.graphics.getGLVersion();
+        log.info(version.getDebugVersionString());
+        initGLAdapter(version);
 
-		int w = Gdx.graphics.getWidth();
-		int h = Gdx.graphics.getHeight();
+        if (!Parameters.CUSTOM_COORD_SCALE) {
+            if (Math.min(Gdx.graphics.getDisplayMode().width, Gdx.graphics.getDisplayMode().height) > 1080)
+                MapRenderer.COORD_SCALE = 4.0f;
+        }
 
-		mMap.viewport().setScreenSize(w, h);
-		mMapRenderer.onSurfaceCreated();
-		mMapRenderer.onSurfaceChanged(w, h);
+        mMap = new MapAdapter();
+        mMapRenderer = new MapRenderer(mMap);
 
-		InputMultiplexer mux = new InputMultiplexer();
-		mux.addProcessor(new InputHandler(this));
-		//mux.addProcessor(new GestureDetector(20, 0.5f, 2, 0.05f,
-		//                                     new MapController(mMap)));
-		mux.addProcessor(new MotionHandler(mMap));
+        Gdx.graphics.setContinuousRendering(false);
+        Gdx.app.setLogLevel(Application.LOG_DEBUG);
 
-		Gdx.input.setInputProcessor(mux);
+        int w = Gdx.graphics.getWidth();
+        int h = Gdx.graphics.getHeight();
 
-		createLayers();
-	}
+        mMap.viewport().setViewSize(w, h);
+        mMapRenderer.onSurfaceCreated();
+        mMapRenderer.onSurfaceChanged(w, h);
 
-	protected void createLayers() {
-		mMap.layers().add(new TileGridLayer(mMap));
-	}
+        InputMultiplexer mux = new InputMultiplexer();
+        if (!Parameters.MAP_EVENT_LAYER2) {
+            mGestureDetector = new GestureDetector(new GestureHandlerImpl(mMap));
+            mux.addProcessor(mGestureDetector);
+        }
+        mux.addProcessor(new InputHandler(this));
+        mux.addProcessor(new MotionHandler(mMap));
 
-	@Override
-	public void dispose() {
+        Gdx.input.setInputProcessor(mux);
 
-	}
+        createLayers();
+    }
 
-	@Override
-	public void render() {
-		if (!mMapAdapter.needsRedraw())
-			return;
+    protected abstract void initGLAdapter(GLVersion version);
 
-		mMapRenderer.onDrawFrame();
-	}
+    protected void createLayers() {
+    }
 
-	@Override
-	public void resize(int w, int h) {
-		mMap.viewport().setScreenSize(w, h);
-		mMapRenderer.onSurfaceChanged(w, h);
-		mMap.render();
-	}
+    @Override
+    public void dispose() {
 
-	@Override
-	public void pause() {
-	}
+    }
 
-	@Override
-	public void resume() {
-	}
+    /* private */ boolean mRenderWait;
+    /* private */ boolean mRenderRequest;
+    /* private */ boolean mUpdateRequest;
 
-	protected boolean onKeyDown(int keycode) {
-		return false;
-	}
+    @Override
+    public void render() {
+        // Workaround for flickering
+        /*if (!mRenderRequest)
+            return;*/
 
-	public Map getMap() {
-		return mMap;
-	}
+        mMapRenderer.onDrawFrame();
+    }
 
-	static class MapAdapter extends Map {
-		boolean mRenderRequest;
+    @Override
+    public void resize(int w, int h) {
+        mMap.viewport().setViewSize(w, h);
+        mMapRenderer.onSurfaceChanged(w, h);
+        mMap.render();
+    }
 
-		@Override
-		public int getWidth() {
-			return Gdx.graphics.getWidth();
-		}
+    @Override
+    public void pause() {
+    }
 
-		@Override
-		public int getHeight() {
-			return Gdx.graphics.getHeight();
-		}
+    @Override
+    public void resume() {
+    }
 
-		@Override
-		public void updateMap(boolean forceRender) {
-			if (!mWaitRedraw) {
-				mWaitRedraw = true;
-				Gdx.app.postRunnable(mRedrawRequest);
-			}
-		}
+    protected boolean onKeyDown(int keycode) {
+        return false;
+    }
 
-		@Override
-		public void render() {
-			mRenderRequest = true;
-			if (mClearMap)
-				updateMap(false);
-			else
-				Gdx.graphics.requestRendering();
-		}
+    public Map getMap() {
+        return mMap;
+    }
 
-		@Override
-		public boolean post(Runnable runnable) {
-			Gdx.app.postRunnable(runnable);
-			return true;
-		}
+    class MapAdapter extends Map {
 
-		@Override
-		public boolean postDelayed(final Runnable action, long delay) {
-			Timer.schedule(new Task() {
-				@Override
-				public void run() {
-					action.run();
-				}
-			}, delay / 1000f);
-			return true;
-		}
+        @Override
+        public int getWidth() {
+            return Gdx.graphics.getWidth();
+        }
 
-		/**
-		 * Update all Layers on Main thread.
-		 * 
-		 * @param forceRedraw
-		 *            also render frame FIXME (does nothing atm)
-		 */
-		private void redrawMapInternal(boolean forceRedraw) {
-			updateLayers();
+        @Override
+        public int getHeight() {
+            return Gdx.graphics.getHeight();
+        }
 
-			mRenderRequest = true;
-			Gdx.graphics.requestRendering();
-		}
+        @Override
+        public int getScreenWidth() {
+            return Gdx.graphics.getDisplayMode().width;
+        }
 
-		/* private */boolean mWaitRedraw;
-		private final Runnable mRedrawRequest = new Runnable() {
-			@Override
-			public void run() {
-				mWaitRedraw = false;
-				redrawMapInternal(false);
-			}
-		};
+        @Override
+        public int getScreenHeight() {
+            return Gdx.graphics.getDisplayMode().height;
+        }
 
-		public boolean needsRedraw() {
-			if (!mRenderRequest)
-				return false;
+        private final Runnable mRedrawCb = new Runnable() {
+            @Override
+            public void run() {
+                prepareFrame();
+                Gdx.graphics.requestRendering();
+            }
+        };
 
-			mRenderRequest = false;
-			return true;
-		}
+        @Override
+        public void updateMap() {
+            updateMap(true);
+        }
 
-	}
+        @Override
+        public void updateMap(boolean forceRender) {
+            synchronized (mRedrawCb) {
+                if (!mRenderRequest) {
+                    mRenderRequest = true;
+                    Gdx.app.postRunnable(mRedrawCb);
+                } else {
+                    mRenderWait = true;
+                }
+            }
+        }
+
+        @Override
+        public void render() {
+            synchronized (mRedrawCb) {
+                mRenderRequest = true;
+                if (mClearMap)
+                    updateMap(false);
+                else {
+                    Gdx.graphics.requestRendering();
+                }
+            }
+        }
+
+        @Override
+        public boolean post(Runnable runnable) {
+            Gdx.app.postRunnable(runnable);
+            return true;
+        }
+
+        @Override
+        public boolean postDelayed(final Runnable action, long delay) {
+            Timer.schedule(new Task() {
+                @Override
+                public void run() {
+                    action.run();
+                }
+            }, delay / 1000f);
+            return true;
+        }
+
+        @Override
+        public void beginFrame() {
+        }
+
+        @Override
+        public void doneFrame(boolean animate) {
+            synchronized (mRedrawCb) {
+                mRenderRequest = false;
+                if (animate || mRenderWait) {
+                    mRenderWait = false;
+                    updateMap(true);
+                }
+            }
+        }
+    }
 }

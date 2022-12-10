@@ -1,6 +1,7 @@
 /*
  * Copyright 2010, 2011, 2012 mapsforge.org
  * Copyright 2013 Hannes Janetzek
+ * Copyright 2016-2019 devemux86
  *
  * This file is part of the OpenScienceMap project (http://www.opensciencemap.org).
  *
@@ -17,41 +18,102 @@
  */
 package org.oscim.theme.styles;
 
+import org.oscim.backend.canvas.Color;
+
 /**
  * Represents a round area on the map.
  */
-public final class CircleStyle extends RenderStyle {
+public final class CircleStyle extends RenderStyle<CircleStyle> {
 
-	public final int level;
+    public final int fillColor;
+    private final int level;
+    public final float radius;
+    public final boolean scaleRadius;
+    public final int strokeColor;
+    public final float strokeWidth;
 
-	public final int fill;
-	public final int outline;
-	public final float radius;
-	public float renderRadius;
-	public final boolean scaleRadius;
-	public final float strokeWidth;
+    public CircleStyle(float radius, boolean scaleRadius, int fillColor, int strokeColor,
+                       float strokeWidth, int level) {
+        this.radius = radius;
+        this.scaleRadius = scaleRadius;
+        this.fillColor = fillColor;
+        this.strokeColor = strokeColor;
+        this.strokeWidth = strokeWidth;
+        this.level = level;
+    }
 
-	public CircleStyle(Float radius, boolean scaleRadius, int fill, int stroke,
-	        float strokeWidth, int level) {
-		super();
+    public CircleStyle(CircleBuilder<?> b) {
+        this.cat = b.cat;
+        this.radius = b.radius;
+        this.scaleRadius = b.scaleRadius;
+        this.fillColor = b.themeCallback != null ? b.themeCallback.getColor(this, b.fillColor) : b.fillColor;
+        this.strokeColor = b.themeCallback != null ? b.themeCallback.getColor(this, b.strokeColor) : b.strokeColor;
+        this.strokeWidth = b.strokeWidth;
+        this.level = b.level;
+    }
 
-		this.radius = radius.floatValue();
-		this.scaleRadius = scaleRadius;
+    @Override
+    public CircleStyle current() {
+        return (CircleStyle) mCurrent;
+    }
 
-		this.fill = fill;
-		this.outline = stroke;
+    @Override
+    public void renderNode(Callback cb) {
+        cb.renderCircle(this, this.level);
+    }
 
-		this.strokeWidth = strokeWidth;
-		this.level = level;
-	}
+    public static class CircleBuilder<T extends CircleBuilder<T>> extends StyleBuilder<T> {
 
-	@Override
-	public void renderNode(Callback cb) {
-		cb.renderCircle(this, this.level);
-	}
+        public float radius;
+        public boolean scaleRadius;
 
-	@Override
-	public CircleStyle current() {
-		return (CircleStyle) mCurrent;
-	}
+        public CircleBuilder() {
+        }
+
+        public T set(CircleStyle circle) {
+            if (circle == null)
+                return reset();
+
+            this.radius = circle.radius;
+            this.scaleRadius = circle.scaleRadius;
+            this.fillColor = themeCallback != null ? themeCallback.getColor(circle, circle.fillColor) : circle.fillColor;
+            this.strokeColor = themeCallback != null ? themeCallback.getColor(circle, circle.strokeColor) : circle.strokeColor;
+            this.strokeWidth = circle.strokeWidth;
+            this.cat = circle.cat;
+            this.level = circle.level;
+
+            return self();
+        }
+
+        public T radius(float radius) {
+            this.radius = radius;
+            return self();
+        }
+
+        public T scaleRadius(boolean scaleRadius) {
+            this.scaleRadius = scaleRadius;
+            return self();
+        }
+
+        public T reset() {
+            cat = null;
+            level = -1;
+            radius = 0;
+            scaleRadius = false;
+            fillColor = Color.TRANSPARENT;
+            strokeColor = Color.TRANSPARENT;
+            strokeWidth = 0;
+            return self();
+        }
+
+        @Override
+        public CircleStyle build() {
+            return new CircleStyle(this);
+        }
+    }
+
+    @SuppressWarnings("rawtypes")
+    public static CircleBuilder<?> builder() {
+        return new CircleBuilder();
+    }
 }

@@ -1,79 +1,86 @@
+[![Maven Central](https://img.shields.io/maven-central/v/org.mapsforge/vtm.svg)](https://search.maven.org/search?q=g:org.mapsforge)
+[![License: LGPL v3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](http://www.gnu.org/licenses/lgpl-3.0)
+
 # V™
-<br/>
 
+<img src="docs/logo/VTM.svg" style="bottom:0;" width="200" align="right">
 
-**Development continues at https://github.com/mapsforge/vtm**
-#<br/>
-VTM is developed within the [OpenScienceMap](http://opensciencemap.org) project.
+VTM (Vector Tile Map) was developed within the [OpenScienceMap](https://github.com/opensciencemap) project.
+
+**This fork continues VTM development and provides compatibility with [Mapsforge](https://github.com/mapsforge/mapsforge).**
+
+See the **[integration guide](docs/Integration.md)** and [changelog](docs/Changelog.md). And read through [how to contribute](docs/CONTRIBUTING.md) guidelines.
+
+If you have any questions or problems, don't hesitate to ask the Discussions for help.
 
 ## Features
 - Java map library
 - OpenGL vector-tile rendering
-- Themeable vector layers
+- Themeable vector layers ([render themes](docs/Rendertheme.md))
 - Support for multiple tile sources:
-  - primary opensciencemap (.vtm)
-  - mapsforge files
-  - GeoJSON tiles
-  - bitmap: any quadtree-scheme tiles as texture
+  - OpenScienceMap vector tiles
+  - Mapsforge vector maps
+  - MBTiles vector & raster maps
+  - Mapbox vector tiles (e.g. Mapilion, Mapzen, Nextzen, OpenMapTiles)
+  - GeoJSON vector tiles (e.g. Mapzen, Nextzen)
+  - Raster tiles: any quadtree-scheme tiles as texture
 - Backends:
-  - Android
-  - Desktop (using libgdx/LwjGL)
-  - HTML5/WebGL (using libgdx/GWT)
-  - iOS (using libgdx/robovm)
+  - Android ([example](vtm-android-example/src/org/oscim/android/test/GettingStarted.java))
+  - iOS (libGDX/RoboVM, [instructions](docs/ios.md))
+  - Desktop (libGDX/LWJGL, [instructions](docs/desktop.md))
+  - HTML5/WebGL (libGDX/GWT, [instructions](docs/web.md))
 
 ### Projects
-- **vtm** contains the core library
-- **vtm-android** Android backend  (no libgdx required)
-- **vtm-android-example** provides examples using **vtm-android**
-- **vtm-gdx** common libgdx backend code
-- **vtm-android-gdx** Android application
-- **vtm-desktop** Desktop application
-- **vtm-web** HTML5/GWT backend
+- **vtm** core library
+- **vtm-android** Android backend
+- **vtm-android-example** Android examples
+- **vtm-gdx** common libGDX backend
+- **vtm-android-gdx** Android libGDX backend
+- **vtm-desktop** Desktop libGDX backend
+- **vtm-desktop-lwjgl** Desktop LWJGL backend
+- **vtm-desktop-lwjgl3** Desktop LWJGL 3 backend
+- **vtm-playground** Desktop examples
+- **vtm-ios** iOS libGDX backend
+- **vtm-ios-example** iOS examples
+- **vtm-web** HTML5/GWT libGDX backend
 - **vtm-web-app** HTML5/GWT application
-- **vtm-ios** iOS application
-
-The libgdx backends for GWT and iOS are very experimental. 
-
-
-## Getting started
-
-`git clone --recursive https://github.com/opensciencemap/vtm`
-
-Install Android SDK and build-tools 20.0. From extras add
-'Android Support Library/Repository' and 'Google Repository'.
-The commands below should set things up correctly when Android
-SDK is already installed.
-```
-export ANDROID_HOME=/path/to/your/android-sdk
-./android-stuff.sh
-```
-
-### Eclipse
-`./gradlew eclipse`<br/>
-Import all 'vtm' sub-projects into Eclipse.
-
-
-### Android-Studio
-Just import build.gradle
-
-### Gradle
-You can run gradle tasks directly (see also `./gradlew -q tasks`):<br/>
-`./gradlew clean install` <br/> to build the libraries and add them to the local maven repository.<br/>
-`./gradlew :vtm-android-example:run` <br/> to run the android example<br/>
-`./gradlew :vtm-desktop:run` <br/>to run the desktop demo (only Linux64 and Win64 native libs are provided atm)<br/>
-`./gradlew :vtm-web-app:jettyDraftWar` <br/>to run the webgl demo<br/>
-
 
 ## WebGL Demo
 [OpenScienceMap](http://opensciencemap.org/s3db/#scale=17,rot=61,tilt=51,lat=53.075,lon=8.807) view of Bremen.
-- hold right mouse button to change view direction
+- Hold right mouse button to change view direction.
 
+## Applications
+- VTM is used by many [applications](docs/Applications.md).
+
+## Maps
+- Mapsforge [map providers](docs/Mapsforge-Maps.md).
 
 ## Credits
 This library contains code from several projects:
-- **mapsforge**: based on 0.2.4 (http://mapsforge.org)
-- **osmdroid**: some overlay classes (http://code.google.com/p/osmdroid/)
-- **libgdx**: AsyncTask, MathUtils and Interpolation classes (https://github.com/libgdx)
-- **Android**: some Matrix code, TimSort (http://source.android.com)
-- **tessellate**: (https://github.com/cscheid/tessellate)
+- **Android** (Apache 2.0): some Matrix code, TimSort (http://source.android.com)
+- **libGDX** (Apache 2.0): AsyncTask, MathUtils, Interpolation, PixmapPacker (https://github.com/libgdx)
+- **mapsforge** (LGPL3): based on 0.2.4 (https://github.com/mapsforge/mapsforge)
+- **osmdroid** (Apache 2.0): some overlay classes (https://github.com/osmdroid/osmdroid)
+- **tessellate** (SGI Free Software License B 2.0): (https://github.com/cscheid/tessellate)
 
+## License
+
+VTM library is under [LGPL v3 license](http://www.gnu.org/licenses/lgpl-3.0), with an important simplification: the constraints mentioned in sections LGPL v3 §4(d) and §4(e) are waived.
+
+This means that you are allowed to convey a Combined Work without providing the user any way to recombine or relink the application and without providing any shared library mechanism.
+
+In other words, you are allowed to include VTM library in your Android application, without making your application open source.
+
+## Screenshots
+
+| Android       | iOS           |
+| ------------- | ------------- |
+|<img src="docs/images/android.png" width="1000">|<img src="docs/images/ios.png" width="1000">|
+
+| Desktop       |
+| ------------- |
+|![Desktop](docs/images/desktop.png)|
+
+| Browser       |
+| ------------- |
+|![Browser](docs/images/browser.png)|
